@@ -1,0 +1,188 @@
+{
+  "width": 415,
+  "height": 568,
+  "method": "median-cut colors and connected components",
+  "regions": [
+    {
+      "id": "region-001",
+      "bbox": [
+        0,
+        0,
+        415,
+        568
+      ],
+      "area_pixels": 151389,
+      "color": "#fce9da",
+      "mask": "masks/region-001.png"
+    },
+    {
+      "id": "region-002",
+      "bbox": [
+        8,
+        29,
+        156,
+        155
+      ],
+      "area_pixels": 1177,
+      "color": "#eff8f7",
+      "mask": "masks/region-002.png"
+    },
+    {
+      "id": "region-003",
+      "bbox": [
+        181,
+        87,
+        69,
+        51
+      ],
+      "area_pixels": 1408,
+      "color": "#c29873",
+      "mask": "masks/region-003.png"
+    },
+    {
+      "id": "region-004",
+      "bbox": [
+        151,
+        130,
+        142,
+        193
+      ],
+      "area_pixels": 7859,
+      "color": "#c29873",
+      "mask": "masks/region-004.png"
+    },
+    {
+      "id": "region-005",
+      "bbox": [
+        61,
+        293,
+        281,
+        185
+      ],
+      "area_pixels": 20388,
+      "color": "#c29873",
+      "mask": "masks/region-005.png"
+    },
+    {
+      "id": "region-006",
+      "bbox": [
+        200,
+        513,
+        177,
+        42
+      ],
+      "area_pixels": 2008,
+      "color": "#c29873",
+      "mask": "masks/region-006.png"
+    },
+    {
+      "id": "region-007",
+      "bbox": [
+        4,
+        25,
+        164,
+        163
+      ],
+      "area_pixels": 1790,
+      "color": "#683f58",
+      "mask": "masks/region-007.png"
+    },
+    {
+      "id": "region-008",
+      "bbox": [
+        12,
+        33,
+        148,
+        148
+      ],
+      "area_pixels": 13517,
+      "color": "#683f58",
+      "mask": "masks/region-008.png"
+    },
+    {
+      "id": "region-009",
+      "bbox": [
+        174,
+        111,
+        74,
+        163
+      ],
+      "area_pixels": 3889,
+      "color": "#683f58",
+      "mask": "masks/region-009.png"
+    },
+    {
+      "id": "region-010",
+      "bbox": [
+        144,
+        239,
+        148,
+        132
+      ],
+      "area_pixels": 5560,
+      "color": "#683f58",
+      "mask": "masks/region-010.png"
+    },
+    {
+      "id": "region-011",
+      "bbox": [
+        263,
+        310,
+        46,
+        138
+      ],
+      "area_pixels": 2369,
+      "color": "#683f58",
+      "mask": "masks/region-011.png"
+    },
+    {
+      "id": "region-012",
+      "bbox": [
+        165,
+        367,
+        56,
+        62
+      ],
+      "area_pixels": 1591,
+      "color": "#683f58",
+      "mask": "masks/region-012.png"
+    },
+    {
+      "id": "region-013",
+      "bbox": [
+        96,
+        386,
+        59,
+        56
+      ],
+      "area_pixels": 1092,
+      "color": "#683f58",
+      "mask": "masks/region-013.png"
+    },
+    {
+      "id": "region-014",
+      "bbox": [
+        65,
+        447,
+        277,
+        34
+      ],
+      "area_pixels": 2882,
+      "color": "#683f58",
+      "mask": "masks/region-014.png"
+    }
+  ],
+  "subject": {
+    "method": "GrabCut initialized by user rectangle",
+    "rect": [
+      57,
+      76,
+      290,
+      410
+    ],
+    "mask": "subject-mask.png",
+    "cutout": "subject.png",
+    "pixels": 55621
+  },
+  "note": "Regions are color components, not object or original layer detection; masks may fragment or merge objects."
+}

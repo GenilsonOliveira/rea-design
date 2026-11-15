@@ -1,0 +1,6 @@
+{
+  "width": 415,
+  "height": 568,
+  "mean_absolute_rgb_error": 6.6183,
+  "note": "Pixel error (0\u2013255) is alignment-sensitive and is not a perceptual quality score."
+}

@@ -88,9 +88,24 @@ def main():
     p.add_argument("reference")
     p.add_argument("candidate")
     p.add_argument("--out", required=True)
+    p = sub.add_parser("ocr", help="Detect text and polygons using local RapidOCR")
+    p.add_argument("image")
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("segment", help="Generate color region masks and optional GrabCut subject")
+    p.add_argument("image")
+    p.add_argument("--out", required=True)
+    p.add_argument("--rect", type=int, nargs=4, metavar=("X", "Y", "WIDTH", "HEIGHT"))
+    p.add_argument("--colors", type=int, default=8)
+    p.add_argument("--min-area", type=float, default=0.001)
     args = parser.parse_args()
     try:
-        result = inspect(args.image, args.out) if args.command == "inspect" else compare(args.reference, args.candidate, args.out)
+        if args.command == "inspect":
+            result = inspect(args.image, args.out)
+        elif args.command == "compare":
+            result = compare(args.reference, args.candidate, args.out)
+        else:
+            from .vision import ocr, segment
+            result = ocr(args.image, args.out) if args.command == "ocr" else segment(args.image, args.out, args.rect, args.colors, args.min_area)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     except (OSError, ValueError, UnidentifiedImageError) as exc:
         print(f"rea-design: {exc}", file=sys.stderr)

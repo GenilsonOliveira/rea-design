@@ -1,0 +1,46 @@
+{
+  "source_name": "reference.png",
+  "sha256": "8beb00c8c094882fbaf5f3679c8d4280f7f70728aca8c68de957b31bab308f5d",
+  "width": 415,
+  "height": 568,
+  "aspect_ratio": 0.7306,
+  "alpha_extrema": [
+    255,
+    255
+  ],
+  "palette": [
+    {
+      "hex": "#fce9da",
+      "fraction": 0.6222
+    },
+    {
+      "hex": "#65425d",
+      "fraction": 0.1642
+    },
+    {
+      "hex": "#cea076",
+      "fraction": 0.1632
+    },
+    {
+      "hex": "#f1f8f5",
+      "fraction": 0.0188
+    },
+    {
+      "hex": "#fdebd0",
+      "fraction": 0.0135
+    },
+    {
+      "hex": "#fce9db",
+      "fraction": 0.0103
+    },
+    {
+      "hex": "#fdf0e3",
+      "fraction": 0.0049
+    },
+    {
+      "hex": "#fde9da",
+      "fraction": 0.0029
+    }
+  ],
+  "palette_method": "8-color median-cut quantization of a max 512px image, composited on white"
+}
