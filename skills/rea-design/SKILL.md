@@ -1,0 +1,16 @@
+---
+name: rea-design
+description: Reverse engineer a supplied image, post, banner or graphic into an evidence-backed design breakdown and an actionable reconstruction plan. Use for visual style, composition, typography, overlapping elements and inferred layers.
+---
+
+# rea-design
+
+Treat the source as a flattened observation, not as the original editable document. Do not claim hidden pixels, exact fonts, blend modes, asset provenance or layer boundaries as facts without evidence. A vision-capable agent is required for semantic interpretation; the CLI provides measurements and views, not automatic layer extraction.
+
+1. Establish the source and requested outcome: analysis, editable recreation, or style transfer. Inspect the actual image at full size and run `rea-design inspect <image> --out <output>` when available. Read `evidence.json`, `grid.png`, `edges.png` and relevant overlapping crops. Preserve the source; don't overwrite previous work. If the CLI is unavailable, use equivalent tools and state what was not measured.
+2. Work from canvas to regions to details. Map visual hierarchy, alignment, negative space and reading order. Identify visible elements and estimate their pixel bounding boxes and normalized coordinates (x/width, y/height, width/width, height/height). Check crops at overlaps and edges before deciding front-to-back order. A crop or edge map is evidence of visible boundaries, not proof of independent layers.
+3. Write `DESIGN.md` using [the breakdown contract](references/design-format.md). Separate measured facts, visual observations and hypotheses; cite filenames or coordinates for each major claim. Record alternatives and confidence where occlusion, transparency or effects create ambiguity. Describe typography by visible characteristics; suggest candidates only as unverified. Record actual text only when legible, marking uncertain text.
+4. Provide an ordered build recipe: canvas, background, subjects, geometry, text, masks, compositing, lighting and texture as appropriate. For each element describe editable representation, placement, effect parameters or plausible ranges, and dependencies. Distinguish reusable style from logos, copy and source assets. Never promise to recover hidden originals from one raster image.
+5. If reconstruction is requested, use available editing tools to create it and render a preview. When the canvases match, run `rea-design compare <reference> <render> --out <comparison>` and inspect overlay and difference plus the images themselves. Iterate on the largest visible discrepancies: composition, overlap and typography before small texture. Pixel error is alignment-sensitive, not a perceptual score. Report remaining differences and unavailable capabilities. Only claim a completed recreation when an artifact was actually created and checked.
+
+Use other installed skills or tools when they concretely help with OCR, segmentation, font search, image editing, or a requested output format. Verify their output visually. Prefer licensed or user-provided assets when recreating; note substitutions and avoid suggesting that a visual match proves original provenance.

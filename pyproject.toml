@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rea-design"
+version = "0.1.0"
+description = "Evidence-assisted visual design reverse engineering for agents"
+requires-python = ">=3.10"
+dependencies = ["Pillow>=10"]
+
+[project.scripts]
+rea-design = "rea_design.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["rea_design*"]
