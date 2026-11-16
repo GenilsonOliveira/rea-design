@@ -13,6 +13,7 @@ from .cli import flatten, load, protect_inputs
 from .generative import apply_repair, read_repair_jobs
 from .layering import propose_groups, suggest_overlap, suggested_paint_order
 from .repair import LamaRepair, expand_overlap, validate_repair_options
+from .title_edit import export_title_edit, infer_title_foregrounds, title_cleanup_mask
 from .vision import _deps
 
 
@@ -201,11 +202,22 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, t
         raise ValueError("Evidence contains duplicate layer IDs")
     overlaps = []
     areas = [int(np.count_nonzero(mask)) for mask in masks]
+    title_evidence = {}
+    if grounded_source_hash == source_hash:
+        photo_masks = {layer["id"]: mask.astype(np.uint8) * 255
+                       for layer, mask in zip(layers, masks, strict=True) if layer["kind"] == "object"}
+        title_evidence = {title["id"]: infer_title_foregrounds(image, title, photo_masks) for title in title_blocks}
     for i in range(len(layers)):
         for j in range(i+1, len(layers)):
             count = int(np.count_nonzero(masks[i] & masks[j]))
             if count:
-                overlaps.append(suggest_overlap(layers[i], layers[j], areas[i], areas[j], count))
+                entry = suggest_overlap(layers[i], layers[j], areas[i], areas[j], count)
+                front, title = layers[i]["id"], layers[j]["id"]
+                evidence = title_evidence.get(title, {}).get(front)
+                if evidence:
+                    entry.update(ordering="suggested", behind=title, in_front=front, **evidence,
+                                 evidence="title-colored ink stops at the object boundary")
+                overlaps.append(entry)
     propose_groups(layers)
     data = {"version": "0.2", "width": w, "height": h, "source_sha256": source_hash, "layers": layers,
             "overlaps": overlaps, "render_order": suggested_paint_order(layers, overlaps),
@@ -285,6 +297,23 @@ def title_attributes(line, block, font_file):
     return attrs
 
 
+def svg_document(size, description):
+    ns = "http://www.w3.org/2000/svg"
+    ET.register_namespace("", ns)
+    namespace = f"{{{ns}}}"
+    w, h = size
+    svg = ET.Element(f"{namespace}svg", {"width": str(w), "height": str(h), "viewBox": f"0 0 {w} {h}", "version": "1.1"})
+    ET.SubElement(svg, f"{namespace}title").text = description
+    return namespace, svg
+
+
+def append_title_lines(group, namespace, item, title_font):
+    for index, line in enumerate(item["lines"], 1):
+        attrs = title_attributes(line, item, title_font)
+        attrs["id"] = f"{item['id']}-line-{index:03d}"
+        ET.SubElement(group, f"{namespace}text", attrs).text = line["text"]
+
+
 def read_scene_input(source, scene_path, clean_plate):
     scene = json.loads(scene_path.read_text(encoding="utf-8-sig"))
     image = load(source)
@@ -344,9 +373,15 @@ def object_overlap(coverage, occluders, seen_masks, box):
 
 
 def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None, title_font=None,
-               repair_plate=None, repair_model=None, generative_repairs=(), moves=(), title_lines=None):
+               repair_plate=None, repair_model=None, generative_repairs=(), moves=(), title_lines=None,
+               title_only=False, title_behind=()):
     cv2, np = _deps()
     validate_repair_options(repair_plate, repair_model)
+    if title_behind and not title_only:
+        raise ValueError("--title-behind requires --title-only")
+    if title_only and (title_lines is None or any((moves, clean_plate, background_plate, repair_plate,
+                                                    repair_model, generative_repairs))):
+        raise ValueError("--title-only requires --title-line, using the source image without moves or plates")
     if generative_repairs and (repair_plate or repair_model):
         raise ValueError("Choose generative repair, a repair plate, or LaMa")
     scene_path = Path(scene_path).resolve()
@@ -376,6 +411,9 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             raise ValueError("Repeat --title-line once per line of the single editable title")
         for line, text in zip(titles[0]["lines"], title_lines, strict=True):
             line["text"] = text
+        if title_only:
+            return export_title_edit(image, pixel_hash, scene, scene_path, output, titles[0], title_font,
+                                     title_behind)
     repair = None
     if repair_plate:
         protect_inputs((output,), repair_plate)
@@ -407,14 +445,13 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             continue
         if item["kind"] == "text-block":
             if not clean_plate:
-                for line in item["lines"]:
-                    region = np.zeros_like(removal)
-                    region[box_slice(line["bbox"], (w, h))] = 255
-                    glyphs = glyph_mask(display, region)
-                    if not glyphs.any():
-                        warnings.append(f"{ident}: could not isolate title glyphs; source text may remain visible")
-                    front_graphics |= glyphs
-                    removal |= glyphs
+                protected = np.zeros_like(removal)
+                for front in occluders.get(ident, ()):
+                    if front in seen_masks:
+                        protected |= seen_masks[front]
+                glyphs = title_cleanup_mask(display, item, protected, warnings)
+                front_graphics |= glyphs
+                removal |= glyphs
             continue
         if item["kind"] == "text":
             glyphs = glyph_mask(display, text_mask(item, (w, h)))
@@ -486,12 +523,9 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
         background = Image.new("RGBA", image.size)
     else:
         background = Image.fromarray(inpaint_rgba(pixels, removal))
-    ns = "http://www.w3.org/2000/svg"
-    ET.register_namespace("", ns)
-    svg = ET.Element(f"{{{ns}}}svg", {"width": str(w), "height": str(h), "viewBox": f"0 0 {w} {h}", "version": "1.1"})
-    ET.SubElement(svg, f"{{{ns}}}title").text = "Editable reconstruction proposal; verify layers and text"
+    namespace, svg = svg_document(image.size, "Editable reconstruction proposal; verify layers and text")
     background_id = "background-supplied" if background_plate else "background-inpainted"
-    ET.SubElement(svg, f"{{{ns}}}image", {"id": background_id, "width": str(w), "height": str(h), "href": data_uri(background)})
+    ET.SubElement(svg, f"{namespace}image", {"id": background_id, "width": str(w), "height": str(h), "href": data_uri(background)})
     group_runs = Counter()
     previous = None
     for ident in order:
@@ -500,10 +534,10 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
         if category and category != previous:
             group_runs[category] += 1
             suffix = "" if group_runs[category] == 1 else f"-{group_runs[category]}"
-            bundle = ET.SubElement(svg, f"{{{ns}}}g", {"id": f"group-{category}{suffix}", "data-role": category})
+            bundle = ET.SubElement(svg, f"{namespace}g", {"id": f"group-{category}{suffix}", "data-role": category})
         previous = category
         parent = bundle if category else svg
-        group = ET.SubElement(parent, f"{{{ns}}}g", {"id": ident, "data-kind": item["kind"]})
+        group = ET.SubElement(parent, f"{namespace}g", {"id": ident, "data-kind": item["kind"]})
         if ident in moves_by_id:
             group.set("transform", moves_by_id[ident])
         if "role" in item:
@@ -511,23 +545,20 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
         if item["kind"] == "object":
             if ident in objects:
                 if "label" in item:
-                    ET.SubElement(group, f"{{{ns}}}title").text = item["label"]
+                    ET.SubElement(group, f"{namespace}title").text = item["label"]
                 bounds, cutout = objects[ident]
                 left, top, right, bottom = bounds
-                ET.SubElement(group, f"{{{ns}}}image", {"x": str(left), "y": str(top), "width": str(right-left),
+                ET.SubElement(group, f"{namespace}image", {"x": str(left), "y": str(top), "width": str(right-left),
                               "height": str(bottom-top), "href": data_uri(cutout)})
         elif item["kind"] == "rect":
             x, y, width, height = item["bbox"]
             opacity = item.get("opacity", 1)
             if not all(math.isfinite(value) for value in (x, y, width, height, opacity)) or width <= 0 or height <= 0 or not 0 <= opacity <= 1:
                 raise ValueError(f"Invalid rectangle geometry or opacity for {ident}")
-            ET.SubElement(group, f"{{{ns}}}rect", {"x": str(x), "y": str(y), "width": str(width), "height": str(height),
+            ET.SubElement(group, f"{namespace}rect", {"x": str(x), "y": str(y), "width": str(width), "height": str(height),
                        "fill": item["fill"], "fill-opacity": str(opacity)})
         elif item["kind"] == "text-block":
-            for index, line in enumerate(item["lines"], 1):
-                attrs = title_attributes(line, item, title_font)
-                attrs["id"] = f"{ident}-line-{index:03d}"
-                ET.SubElement(group, f"{{{ns}}}text", attrs).text = line["text"]
+            append_title_lines(group, namespace, item, title_font)
         elif item["kind"] == "text":
             # Color is a rough local estimate and font is a generic guess.
             polygon = item["polygon"]
@@ -536,7 +567,7 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             line_height = math.hypot(polygon[3][0] - px, polygon[3][1] - py)
             line_width = math.hypot(polygon[1][0] - px, polygon[1][1] - py)
             font_size = max(1, min(line_height * .8, line_width / max(1, len(item["text"]) * .65)))
-            ET.SubElement(group, f"{{{ns}}}text", {"x": str(px), "y": str(py + line_height*.82), "font-family": item.get("font_family", "sans-serif"),
+            ET.SubElement(group, f"{namespace}text", {"x": str(px), "y": str(py + line_height*.82), "font-family": item.get("font_family", "sans-serif"),
                           "font-size": str(item.get("font_size", font_size)), "fill": item.get("fill", "#222222"), "textLength": str(max(1, line_width)),
                           "transform": f"rotate({angle:.3f} {px} {py})", "lengthAdjust": "spacingAndGlyphs"}).text = item["text"]
         else:

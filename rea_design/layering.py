@@ -16,17 +16,29 @@ def suggest_overlap(first, second, first_area, second_area, pixels):
 
 
 def suggested_paint_order(layers, overlaps):
-    pending = [layer["id"] for layer in layers if layer["kind"] == "object"]
-    behind = {item: set() for item in pending}
+    baseline = sorted(layers, key=lambda layer: layer["kind"] != "object")
+    behind = {layer["id"]: [] for layer in baseline}
     for overlap in overlaps:
-        if overlap["ordering"] == "suggested":
-            behind[overlap["in_front"]].add(overlap["behind"])
+        if overlap["ordering"] in {"suggested", "confirmed"}:
+            behind[overlap["in_front"]].append(overlap["behind"])
     order = []
-    while pending:
-        ready = next(ident for ident in pending if not behind[ident].intersection(pending))
-        order.append(ready)
-        pending.remove(ready)
-    return order + [layer["id"] for layer in layers if layer["kind"] != "object"]
+    placed, visiting = set(), set()
+
+    def place(ident):
+        if ident in placed:
+            return
+        if ident in visiting:
+            raise ValueError("Layer ordering evidence contains a cycle")
+        visiting.add(ident)
+        for predecessor in behind[ident]:
+            place(predecessor)
+        visiting.remove(ident)
+        placed.add(ident)
+        order.append(ident)
+
+    for layer in baseline:
+        place(layer["id"])
+    return order
 
 
 def propose_groups(layers):

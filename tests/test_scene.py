@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 from PIL import Image, ImageDraw
 from rea_design.generative import prepare_repair
 from rea_design.scene import make_scene, export_svg
+from rea_design.title_edit import title_cleanup_mask, title_ink, title_overlap_evidence
 
 SVG = {"s": "http://www.w3.org/2000/svg"}
 
@@ -22,6 +23,54 @@ def embedded_image(node):
 
 @unittest.skipUnless(importlib.util.find_spec("cv2") and importlib.util.find_spec("numpy"), "install rea-design[vision]")
 class SceneTests(unittest.TestCase):
+    def test_local_title_replacement_cleans_old_letters_and_keeps_foreground_pixels(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            photo = Image.new("RGBA", (110, 104), "#e2d4bf")
+            draw = ImageDraw.Draw(photo)
+            for left, right in ((17, 32), (36, 62), (68, 88)):
+                draw.rectangle((left, 22, right, 61), fill="#4b321e")
+            foreground = Image.new("L", photo.size)
+            ImageDraw.Draw(foreground).rectangle((42, 49, 59, 95), fill=255)
+            person_bounds = foreground.getbbox()
+            photo.paste("#142844", (42, 49, 60, 96))
+            source, mask = root / "source.png", root / "person.png"
+            photo.save(source)
+            foreground.save(mask)
+            title = {"id": "title-001", "kind": "text-block", "bbox": [17, 22, 72, 40], "source_ids": [],
+                     "lines": [{"bbox": [17, 22, 72, 40], "text": "OLD", "fill": "#4b321e", "ink_fraction": .72}]}
+            typography = root / "typography.json"
+            typography.write_text(json.dumps({"width": photo.width, "height": photo.height,
+                                              "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                                              "items": [title]}), encoding="utf-8")
+            out = root / "scene"
+            scene = make_scene(source, None, None, out, typography_json=typography, manual=[("person", mask)])
+            self.assertEqual(scene["render_order"], ["title-001", "manual-001"])
+            overlap = scene["overlaps"][0]
+            self.assertEqual((overlap["ordering"], overlap["behind"], overlap["in_front"]),
+                             ("suggested", "title-001", "manual-001"))
+            target = root / "edited.svg"
+            result = export_svg(source, out / "scene.json", target, title_only=True, title_lines=["NEW"])
+            self.assertEqual(result["render_order"], ["background-title-cleaned", "title-001", "manual-001"])
+            svg = ET.parse(target)
+            self.assertEqual(svg.find(".//s:g[@id='title-001']/s:text", SVG).text, "NEW")
+            base = embedded_image(svg.find("s:image[@id='background-title-cleaned']", SVG))
+            cutout = embedded_image(svg.find("s:g[@id='manual-001']/s:image", SVG))
+            np.testing.assert_array_equal(np.asarray(cutout), np.asarray(photo.crop(person_bounds)))
+            np.testing.assert_array_equal(np.asarray(base)[np.asarray(foreground) > 0], 0)
+            removal = title_cleanup_mask(photo.convert("RGB"), title, np.asarray(foreground), []) > 0
+            protected = (np.asarray(foreground) > 0) | removal
+            np.testing.assert_array_equal(np.asarray(base)[~protected], np.asarray(photo)[~protected])
+            self.assertEqual(base.getpixel((24, 40)), photo.getpixel((5, 5)))
+            self.assertEqual(result["cleaned_title_pixels"], int(removal.sum()))
+
+            # Dark ink that continues visibly across the subject must not reverse the layer order.
+            draw.rectangle((42, 49, 59, 61), fill="#4b321e")
+            region, ink = title_ink(photo.convert("RGB"), title["lines"][0])
+            self.assertIsNone(title_overlap_evidence(region, ink, np.asarray(foreground)))
+
     def test_generative_repair_is_bounded_and_rejects_a_stale_manifest(self):
         import numpy as np
 

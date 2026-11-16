@@ -171,6 +171,9 @@ def main():
                         action="append", default=[], help="Apply a masked generative edit. Repeat for distinct layers.")
     p.add_argument("--move", nargs=3, metavar=("LAYER_ID", "DX", "DY"), action="append", default=[])
     p.add_argument("--title-line", action="append", help="Replace successive lines of the single editable title")
+    p.add_argument("--title-only", action="store_true", help="Clean and replace the title while preserving the rest of the source")
+    p.add_argument("--title-behind", action="append", default=[], metavar="LAYER_ID",
+                   help="Explicit foreground object for --title-only; repeat for multiple layers")
     p.add_argument("--title-font", metavar="FONT_FILE", help="Measure the title using a local TTF or OTF")
     p = sub.add_parser("assemble", help="Detect objects, suggest layers and build an editable SVG in one command")
     p.add_argument("image")
@@ -227,7 +230,8 @@ def main():
             result = export_svg(args.image, args.scene, args.out, clean_plate=args.clean_plate,
                                 background_plate=args.background_plate, title_font=args.title_font,
                                 repair_plate=args.repair_plate, repair_model=args.repair_model,
-                                generative_repairs=args.generative_repair, moves=args.move, title_lines=args.title_line)
+                                generative_repairs=args.generative_repair, moves=args.move, title_lines=args.title_line,
+                                title_only=args.title_only, title_behind=args.title_behind)
         # JSON remains lossless even when Windows redirects stdout to a legacy code page.
         print(json.dumps(result, indent=2, ensure_ascii=True))
     except (OSError, ValueError, UnidentifiedImageError) as exc:
