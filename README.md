@@ -52,6 +52,23 @@ Para mover uma cena gerada pela 0.2.1, mantenha `scene.json` junto de `scene-mas
 
 O SVG é autocontido. Contém texto editável e recortes raster separados sobre um fundo raster reconstruído por inpainting, preservando o canal alfa. A limpeza do texto estima os pixels das letras pela cor. A saída inclui avisos quando a estimativa falha ou quando o fundo precisa ficar transparente por falta de pixels disponíveis. Texto residual, artefatos e partes não detectadas podem permanecer no fundo. Tipografia, máscaras e ordem são estimativas. Veja [os testes com duas imagens reais](experiments/RESULTS.md).
 
+### Corrigir máscaras e reconstruir a partir de uma foto limpa
+
+`scene` aceita OCR, segmentação semântica, recortes GrabCut e máscaras manuais em qualquer combinação. Para importar um recorte assistido e corrigir seu contorno:
+
+```powershell
+rea-design segment referencia.png --rect 98 0 538 920 --out analise/recorte
+rea-design scene referencia.png --ocr analise/ocr/ocr.json --grabcut analise/recorte/segments.json --out analise/cena-inicial
+rea-design scene referencia.png --ocr analise/ocr/ocr.json --grabcut analise/recorte/segments.json --replace-mask grabcut-001 mascara-revisada.png --out analise/cena
+rea-design export-svg referencia.png --scene analise/cena/scene.json --clean-plate foto-alinhada.png --out analise/editavel.svg
+```
+
+Use `--mask "nome da camada" caminho.png` para adicionar uma camada manual (`manual-001`, `manual-002`, etc.). As opções `--grabcut`, `--mask` e `--replace-mask` podem ser repetidas. As máscaras devem ter o tamanho do canvas. Use tons de cinza ou transparência para definir a cobertura. A correção mantém o ID e recalcula os limites e interseções. Gere novamente `segments.json` se o arquivo antigo tiver sido criado antes da inclusão do hash do original.
+
+`--clean-plate` usa uma foto sem os elementos gráficos, com o mesmo tamanho e alinhamento da cena. Confira o alinhamento visual e ajuste as máscaras ao contorno da foto. Nessas cenas, é possível acrescentar retângulos vetoriais com `id`, `kind: "rect"`, `bbox: [x, y, largura, altura]`, `fill` e `opacity` opcional. Inclua os IDs na posição desejada em `render_order`. Isso permite reconstruir células e linhas de grade como elementos que podem ser movidos ou recoloridos. A posição desses elementos é indicada pelo agente ou pela pessoa que revisa a cena.
+
+Se mover o recorte revelar artefatos do preenchimento automático, passe também `--background-plate fundo-sem-o-sujeito.png`. A imagem deve ter o tamanho do canvas. O SVG usa esse fundo sob os recortes e registra o hash da imagem na resposta da CLI.
+
 `inspect` gera dimensões, hash, paleta aproximada, imagem normalizada, grade, mapa de bordas e quatro recortes com contexto. A paleta é quantizada sobre branco. `compare` exige imagens do mesmo tamanho e mede separadamente o erro RGB sobre branco e o erro no canal alfa. Produz também `alpha-difference.png`. A CLI bloqueia caminhos de saída que sobrescrevam suas entradas. Outros arquivos de saída existentes podem ser substituídos.
 
 `ocr` usa RapidOCR/ONNX localmente e gera texto, polígonos, confiança e uma imagem de verificação. Confiança alta não garante transcrição correta; confira letras decorativas e idiomas. `segment` produz máscaras de componentes de cor e caixas em coordenadas da imagem. São regiões visuais, não classes semânticas nem camadas originais. Opcionalmente, `--rect X Y LARGURA ALTURA` seleciona um retângulo aproximado em pixels para separar o primeiro plano via GrabCut, salvando uma máscara e um recorte transparente. O retângulo deve incluir o sujeito e deixar fundo fora dele; o resultado precisa de inspeção. `--colors` controla a quantização (2–16) e `--min-area` o limiar de área como fração da imagem (padrão 0,001). Saídas anteriores em uma pasta reutilizada podem permanecer; use sempre uma pasta nova.

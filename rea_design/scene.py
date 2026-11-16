@@ -72,42 +72,85 @@ def glyph_mask(image, region):
     return cv2.dilate(mask, kernel) & region
 
 
-def make_scene(source, semantic_json, ocr_json, output):
-    cv2, np = _deps()
+def read_mask(mask_bytes, size):
+    with Image.open(io.BytesIO(mask_bytes)) as image:
+        if image.size != size:
+            raise ValueError(f"Mask dimensions {image.size} differ from canvas {size}")
+        if "A" in image.getbands() or "transparency" in image.info:
+            alpha = image.convert("RGBA").getchannel("A")
+            if alpha.getextrema()[0] < 255:
+                return alpha
+        return image.convert("L")
+
+
+def make_scene(source, semantic_json, ocr_json, output, *, grabcut=(), manual=(), replacements=()):
+    _, np = _deps()
     image = flatten(load(source))
     w, h = image.size
-    sem_path, output = Path(semantic_json).resolve(), Path(output).resolve()
-    sem = json.loads(sem_path.read_text(encoding="utf-8-sig"))
-    ocr = json.loads(Path(ocr_json).read_text(encoding="utf-8-sig"))
+    source_hash = sha(source)
+    output = Path(output).resolve()
     scene_file = output / "scene.json"
-    protect_inputs((scene_file,), source, sem_path, ocr_json)
-    if any((data["width"], data["height"]) != (w, h) for data in (sem, ocr)):
-        raise ValueError("Source, semantic and OCR dimensions differ")
-    if sem.get("source_sha256") != sha(source) or ocr.get("source_sha256") != sha(source):
-        raise ValueError("Evidence does not match the source hash; rerun semantic and OCR")
+    if not (semantic_json or ocr_json or grabcut or manual):
+        raise ValueError("Provide at least one of --semantic, --ocr, --grabcut and --mask")
+    evidence_files = [path for path in (semantic_json, ocr_json, *grabcut) if path is not None]
+
+    def read_evidence(path):
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        if (data.get("width"), data.get("height")) != (w, h) or data.get("source_sha256") != source_hash:
+            raise ValueError(f"Evidence does not match source size or hash: {path}; rerun the analysis command")
+        return data
+
+    def mask_from_evidence(path, relative):
+        directory = Path(path).resolve().parent
+        mask = (directory / relative).resolve()
+        if not mask.is_relative_to(directory):
+            raise ValueError("Mask must stay within its evidence directory")
+        return mask
+
+    candidates = []
+    if semantic_json:
+        for item in read_evidence(semantic_json)["items"]:
+            path = mask_from_evidence(semantic_json, item["mask"])
+            candidates.append((item["id"], item["class"], path, "semantic mask"))
+    for index, path in enumerate(grabcut, 1):
+        subject = read_evidence(path).get("subject")
+        if not subject:
+            raise ValueError(f"No GrabCut subject in {path}; run segment with --rect")
+        candidates.append((f"grabcut-{index:03d}", "subject", mask_from_evidence(path, subject["mask"]), "GrabCut mask"))
+    for index, (label, path) in enumerate(manual, 1):
+        candidates.append((f"manual-{index:03d}", label, Path(path), "manual mask"))
+    replacement_map = dict(replacements)
+    if len(replacement_map) != len(replacements) or set(replacement_map).difference(item[0] for item in candidates):
+        raise ValueError("Each --replace-mask must reference a unique existing object ID")
+    inputs = (source, *evidence_files, *(item[2] for item in candidates), *replacement_map.values())
+    protect_inputs((scene_file,), *inputs)
+    ocr_items = read_evidence(ocr_json)["items"] if ocr_json else []
     output.mkdir(parents=True, exist_ok=True)
     layers = []
     masks = []
-    for item in sem["items"]:
-        mask_path = (sem_path.parent / item["mask"]).resolve()
-        if not mask_path.is_relative_to(sem_path.parent):
-            raise ValueError("Semantic mask must stay within the evidence directory")
-        original_mask = mask_path.read_bytes()
+    for ident, label, mask_path, evidence in candidates:
+        if ident in replacement_map:
+            mask_path = Path(replacement_map[ident])
+            evidence = f"manual correction of {evidence}"
+        mask = read_mask(mask_path.read_bytes(), image.size)
+        bounds = mask.getbbox()
+        if bounds is None:
+            raise ValueError(f"Mask is empty for {ident}: {mask_path}")
+        left, top, right, bottom = bounds
+        buffer = io.BytesIO()
+        mask.save(buffer, format="PNG")
+        original_mask = buffer.getvalue()
         mask_hash = hashlib.sha256(original_mask).hexdigest()
-        with Image.open(io.BytesIO(original_mask)) as decoded:
-            mask = np.asarray(decoded.convert("L"))
-        if mask.shape != (h, w):
-            raise ValueError("Semantic mask dimensions differ from the source")
         snapshot_path = f"scene-masks/{mask_hash}.png"
         snapshot = output / snapshot_path
-        protect_inputs((scene_file, snapshot), source, sem_path, ocr_json, mask_path)
         snapshot.parent.mkdir(exist_ok=True)
         if not snapshot.exists() or sha(snapshot) != mask_hash:
+            protect_inputs((snapshot,), *inputs)
             snapshot.write_bytes(original_mask)
-        layers.append({"id": item["id"], "kind": "object", "label": item["class"], "bbox": item["bbox"],
-                       "mask": snapshot_path, "mask_sha256": mask_hash, "evidence": "semantic mask", "depth": "unknown"})
-        masks.append(mask > 0)
-    for item in ocr["items"]:
+        layers.append({"id": ident, "kind": "object", "label": label, "bbox": [left, top, right-left, bottom-top],
+                       "mask": snapshot_path, "mask_sha256": mask_hash, "evidence": evidence, "depth": "unknown"})
+        masks.append(np.asarray(mask) > 0)
+    for item in ocr_items:
         region_mask = text_mask(item, (w, h))
         colors = text_colors(image, region_mask)
         color = "#222222" if colors is None else "#%02x%02x%02x" % tuple(np.rint(colors[0]).astype(int))
@@ -122,7 +165,7 @@ def make_scene(source, semantic_json, ocr_json, output):
             if count:
                 overlaps.append({"layers": [layers[i]["id"], layers[j]["id"]], "intersection_pixels": count,
                                  "ordering": "unknown", "evidence": "mask intersection; not proof of occlusion"})
-    data = {"version": "0.2", "width": w, "height": h, "source_sha256": sha(source), "layers": layers,
+    data = {"version": "0.2", "width": w, "height": h, "source_sha256": source_hash, "layers": layers,
             "overlaps": overlaps, "render_order": [layer["id"] for layer in layers],
             "note": "Proposed paint order: objects then text. It is a rendering assumption, not inferred depth; review and edit render_order."}
     scene_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -152,7 +195,7 @@ def inpaint_rgba(pixels, removal):
     return result
 
 
-def export_svg(source, scene_path, output):
+def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None):
     cv2, np = _deps()
     scene_path = Path(scene_path).resolve()
     scene = json.loads(scene_path.read_text(encoding="utf-8-sig"))
@@ -162,6 +205,16 @@ def export_svg(source, scene_path, output):
     w, h = image.size
     if (scene["width"], scene["height"]) != (w, h) or scene["source_sha256"] != sha(source):
         raise ValueError("Scene does not match source dimensions or hash")
+    if clean_plate:
+        protect_inputs((output,), clean_plate)
+        image = load(clean_plate)
+        if image.size != (w, h):
+            raise ValueError(f"Clean plate must be aligned to the scene canvas ({w} × {h})")
+    if background_plate:
+        protect_inputs((output,), background_plate)
+        supplied_background = load(background_plate)
+        if supplied_background.size != (w, h):
+            raise ValueError(f"Background plate must be aligned to the scene canvas ({w} × {h})")
     layers = scene["layers"]
     by_id = {item["id"]: item for item in layers}
     order = scene["render_order"]
@@ -175,6 +228,8 @@ def export_svg(source, scene_path, output):
     front_text = np.zeros_like(removal)
     for ident in reversed(order):
         item = by_id[ident]
+        if item["kind"] == "rect" or (item["kind"] == "text" and clean_plate):
+            continue
         if item["kind"] == "text":
             glyphs = glyph_mask(display, text_mask(item, (w, h)))
             if not glyphs.any():
@@ -192,10 +247,7 @@ def export_svg(source, scene_path, output):
             warnings.append(f"{ident}: legacy mask without an integrity hash; rerun scene to snapshot it")
         elif hashlib.sha256(mask_bytes).hexdigest() != expected:
             raise ValueError(f"Mask integrity check failed for {ident}: {path}")
-        with Image.open(io.BytesIO(mask_bytes)) as decoded:
-            mask = np.asarray(decoded.convert("L"))
-        if mask.shape != (h, w):
-            raise ValueError("Mask dimensions differ from source")
+        mask = np.asarray(read_mask(mask_bytes, (w, h)))
         coverage = np.where((mask > 0) & (pixels[:, :, 3] > 0), 255, 0).astype(np.uint8)
         removal |= coverage
         bounds = Image.fromarray(coverage).getbbox()
@@ -214,7 +266,9 @@ def export_svg(source, scene_path, output):
         cutout[:, :, 3] = np.minimum(pixels[box][:, :, 3], mask[box])
         objects[ident] = (bounds, Image.fromarray(cutout))
     # This is an approximate background; source pixels behind opaque objects are unavailable.
-    if removal.all():
+    if background_plate:
+        background = supplied_background
+    elif removal.all():
         warnings.append("No uncovered background pixels; the background layer is transparent")
         background = Image.new("RGBA", image.size)
     else:
@@ -223,7 +277,8 @@ def export_svg(source, scene_path, output):
     ET.register_namespace("", ns)
     svg = ET.Element(f"{{{ns}}}svg", {"width": str(w), "height": str(h), "viewBox": f"0 0 {w} {h}", "version": "1.1"})
     ET.SubElement(svg, f"{{{ns}}}title").text = "Editable reconstruction proposal; verify layers and text"
-    ET.SubElement(svg, f"{{{ns}}}image", {"id": "background-inpainted", "width": str(w), "height": str(h), "href": data_uri(background)})
+    background_id = "background-supplied" if background_plate else "background-inpainted"
+    ET.SubElement(svg, f"{{{ns}}}image", {"id": background_id, "width": str(w), "height": str(h), "href": data_uri(background)})
     for ident in order:
         item = by_id[ident]
         group = ET.SubElement(svg, f"{{{ns}}}g", {"id": ident, "data-kind": item["kind"]})
@@ -233,6 +288,13 @@ def export_svg(source, scene_path, output):
                 left, top, right, bottom = bounds
                 ET.SubElement(group, f"{{{ns}}}image", {"x": str(left), "y": str(top), "width": str(right-left),
                               "height": str(bottom-top), "href": data_uri(cutout)})
+        elif item["kind"] == "rect":
+            x, y, width, height = item["bbox"]
+            opacity = item.get("opacity", 1)
+            if not all(math.isfinite(value) for value in (x, y, width, height, opacity)) or width <= 0 or height <= 0 or not 0 <= opacity <= 1:
+                raise ValueError(f"Invalid rectangle geometry or opacity for {ident}")
+            ET.SubElement(group, f"{{{ns}}}rect", {"x": str(x), "y": str(y), "width": str(width), "height": str(height),
+                       "fill": item["fill"], "fill-opacity": str(opacity)})
         elif item["kind"] == "text":
             # Color is a rough local estimate and font is a generic guess.
             polygon = item["polygon"]
@@ -241,12 +303,14 @@ def export_svg(source, scene_path, output):
             line_height = math.hypot(polygon[3][0] - px, polygon[3][1] - py)
             line_width = math.hypot(polygon[1][0] - px, polygon[1][1] - py)
             font_size = max(1, min(line_height * .8, line_width / max(1, len(item["text"]) * .65)))
-            ET.SubElement(group, f"{{{ns}}}text", {"x": str(px), "y": str(py + line_height*.82), "font-family": "sans-serif",
-                          "font-size": str(font_size), "fill": item.get("fill", "#222222"), "textLength": str(max(1, line_width)),
+            ET.SubElement(group, f"{{{ns}}}text", {"x": str(px), "y": str(py + line_height*.82), "font-family": item.get("font_family", "sans-serif"),
+                          "font-size": str(item.get("font_size", font_size)), "fill": item.get("fill", "#222222"), "textLength": str(max(1, line_width)),
                           "transform": f"rotate({angle:.3f} {px} {py})", "lengthAdjust": "spacingAndGlyphs"}).text = item["text"]
         else:
             raise ValueError(f"Unsupported layer kind: {item['kind']}")
     output.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(svg).write(output, encoding="utf-8", xml_declaration=True)
     return {"svg": str(output), "layers": len(layers), "warnings": warnings,
-            "note": "Editable text and raster cutouts over an inpainted raster background; font, depth and hidden pixels are estimates."}
+            "pixel_source_sha256": sha(clean_plate or source),
+            "background_plate_sha256": sha(background_plate) if background_plate else None,
+            "note": "Editable text and raster cutouts over a raster background; font, depth and hidden pixels are estimates."}

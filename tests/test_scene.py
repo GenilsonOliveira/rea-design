@@ -20,6 +20,45 @@ def embedded_image(node):
 
 @unittest.skipUnless(importlib.util.find_spec("cv2") and importlib.util.find_spec("numpy"), "install rea-design[vision]")
 class SceneTests(unittest.TestCase):
+    def test_grabcut_correction_and_manual_mask_with_clean_plate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.png"
+            plate = root / "plate.png"
+            Image.new("RGB", (30, 30), "red").save(source)
+            Image.new("RGB", (30, 30), "blue").save(plate)
+            original = Image.new("L", (30, 30), 0)
+            ImageDraw.Draw(original).rectangle((0, 0, 19, 19), fill=255)
+            original.save(root / "grab.png")
+            segments = root / "segments.json"
+            segments.write_text(json.dumps({"width": 30, "height": 30,
+                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "subject": {"mask": "grab.png"}}))
+            correction = Image.new("RGBA", (30, 30), (255, 255, 255, 0))
+            ImageDraw.Draw(correction).rectangle((3, 4, 7, 9), fill=(0, 0, 0, 180))
+            path = root / "correction.png"
+            correction.save(path)
+            with self.assertRaisesRegex(ValueError, "size or hash"):
+                make_scene(plate, None, None, root / "bad", grabcut=[segments])
+            scene = make_scene(source, None, None, root / "scene", grabcut=[segments],
+                               manual=[("detail", path)], replacements=[("grabcut-001", path)])
+            self.assertEqual([(layer["id"], layer["bbox"]) for layer in scene["layers"]],
+                             [("grabcut-001", [3, 4, 5, 6]), ("manual-001", [3, 4, 5, 6])])
+            self.assertEqual(scene["overlaps"][0]["intersection_pixels"], 30)
+            scene["layers"].append({"id": "tile", "kind": "rect", "bbox": [20, 20, 5, 7], "fill": "#ff0000"})
+            scene["render_order"].append("tile")
+            scene_path = root / "scene/scene.json"
+            scene_path.write_text(json.dumps(scene))
+            out = root / "out.svg"
+            background = root / "background.png"
+            Image.new("RGB", (30, 30), "white").save(background)
+            export_svg(source, scene_path, out, clean_plate=plate, background_plate=background)
+            svg = ET.parse(out)
+            self.assertEqual(svg.find(".//s:rect", SVG).get("width"), "5")
+            bg = svg.find(".//s:image[@id='background-supplied']", SVG)
+            self.assertEqual(embedded_image(bg).getpixel((3, 4)), (255, 255, 255, 255))
+            layer = svg.find(".//s:g[@id='grabcut-001']/s:image", SVG)
+            self.assertEqual(embedded_image(layer).getpixel((0, 0)), (0, 0, 255, 180))
+
     def test_intersection_is_unknown_and_svg_has_editable_text(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

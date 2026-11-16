@@ -100,7 +100,8 @@ def segment(source, output, rect=None, colors=8, min_area=0.001):
         rgba.putalpha(Image.fromarray(foreground))
         rgba.save(output / "subject.png")
         subject = {"method": "GrabCut initialized by user rectangle", "rect": list(rect), "mask": "subject-mask.png", "cutout": "subject.png", "pixels": int(np.count_nonzero(foreground))}
-    data = {"width": w, "height": h, "method": "median-cut colors and connected components", "regions": regions,
+    data = {"width": w, "height": h, "source_sha256": hashlib.sha256(Path(source).read_bytes()).hexdigest(),
+            "method": "median-cut colors and connected components", "regions": regions,
             "subject": subject, "note": "Regions are color components, not object or original layer detection; masks may fragment or merge objects."}
     (output / "segments.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     overlay.save(output / "segments-overlay.png")
