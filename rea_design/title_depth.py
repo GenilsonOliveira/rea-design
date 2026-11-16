@@ -1,5 +1,7 @@
 """Plan mixed title depth and recover underlying photographic strips."""
 
+from PIL import ImageColor
+
 from .paper_repair import restore_paper
 from .vision import _deps
 
@@ -25,6 +27,34 @@ def title_runs(lines, foreground, requested):
     return runs
 
 
+def supported_print_coverage(display, lines, mask, expanded, blocked, radius):
+    from .title_edit import title_ink
+
+    cv2, np = _deps()
+    chroma = np.ptp(np.asarray(display), axis=2)
+    near_radius = max(4, round(radius * .65))
+    footprint = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * near_radius + 1, 2 * near_radius + 1))
+    near = cv2.dilate(mask, footprint) > 0
+    selected = np.zeros_like(mask)
+    for line in lines:
+        color_span = np.ptp(ImageColor.getrgb(line["fill"]))
+        if color_span < 48:
+            continue
+        _, ink = title_ink(display, line, margin=12, chromatic=True)
+        ink[:max(0, line["bbox"][1])] = 0
+        # Use saturated cores so degraded red halos cannot join adjacent letters.
+        strong = (ink > 0) & (chroma >= max(36, .30 * color_span)) & (blocked == 0)
+        cores = cv2.erode(strong.astype(np.uint8), np.ones((3, 3), np.uint8))
+        _, labels, stats, _ = cv2.connectedComponentsWithStats(cores, connectivity=8)
+        areas = stats[:, cv2.CC_STAT_AREA]
+        inside = np.bincount(labels[expanded > 0], minlength=len(areas))
+        around = np.bincount(labels[near], minlength=len(areas))
+        candidates = (areas >= 96) & (inside >= .20 * areas) & (around >= .60 * areas)
+        candidates[0] = False
+        selected[candidates[labels]] = 255
+    return cv2.dilate(selected, np.ones((11, 11), np.uint8)) & (255 - blocked)
+
+
 def recover_photo_ink(pixels, display, title, ids, coverages, runs):
     """Extend visible object masks across old ink only where a line is explicitly above them."""
     from .scene import inpaint_rgba
@@ -46,7 +76,8 @@ def recover_photo_ink(pixels, display, title, ids, coverages, runs):
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
         expanded = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         # Closing bridges the painted notches in a visible silhouette. Clip the extension to old ink.
-        coverage = mask | (expanded & ink)
+        printed = supported_print_coverage(display, lines, mask, expanded, blocked, radius)
+        coverage = mask | ((expanded | printed) & ink)
         repair = coverage & ink
         if not repair.any():
             continue
