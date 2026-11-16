@@ -83,16 +83,16 @@ def read_mask(mask_bytes, size):
         return image.convert("L")
 
 
-def make_scene(source, semantic_json, ocr_json, output, *, grabcut=(), manual=(), replacements=()):
+def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, grabcut=(), manual=(), replacements=()):
     _, np = _deps()
     image = flatten(load(source))
     w, h = image.size
     source_hash = sha(source)
     output = Path(output).resolve()
     scene_file = output / "scene.json"
-    if not (semantic_json or ocr_json or grabcut or manual):
-        raise ValueError("Provide at least one of --semantic, --ocr, --grabcut and --mask")
-    evidence_files = [path for path in (semantic_json, ocr_json, *grabcut) if path is not None]
+    if not (semantic_json or ocr_json or geometry_json or grabcut or manual):
+        raise ValueError("Provide at least one of --semantic, --ocr, --geometry, --grabcut and --mask")
+    evidence_files = [path for path in (semantic_json, ocr_json, geometry_json, *grabcut) if path is not None]
 
     def read_evidence(path):
         data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
@@ -150,6 +150,14 @@ def make_scene(source, semantic_json, ocr_json, output, *, grabcut=(), manual=()
         layers.append({"id": ident, "kind": "object", "label": label, "bbox": [left, top, right-left, bottom-top],
                        "mask": snapshot_path, "mask_sha256": mask_hash, "evidence": evidence, "depth": "unknown"})
         masks.append(np.asarray(mask) > 0)
+    if geometry_json:
+        for item in read_evidence(geometry_json)["items"]:
+            if item.get("kind") != "rect":
+                raise ValueError("Geometry evidence must contain rectangles")
+            layers.append({**item, "evidence": "detected raster geometry", "depth": "unknown"})
+            mask = np.zeros((h, w), dtype=bool)
+            mask[box_slice(item["bbox"], image.size)] = True
+            masks.append(mask)
     for item in ocr_items:
         region_mask = text_mask(item, (w, h))
         colors = text_colors(image, region_mask)
@@ -158,6 +166,8 @@ def make_scene(source, semantic_json, ocr_json, output, *, grabcut=(), manual=()
                        "polygon": item["polygon"], "confidence": item["confidence"], "depth": "unknown",
                        "fill": color, "fill_evidence": "two-color estimate; verify visually"})
         masks.append(region_mask > 0)
+    if len({layer["id"] for layer in layers}) != len(layers):
+        raise ValueError("Evidence contains duplicate layer IDs")
     overlaps = []
     for i in range(len(layers)):
         for j in range(i+1, len(layers)):
@@ -167,7 +177,7 @@ def make_scene(source, semantic_json, ocr_json, output, *, grabcut=(), manual=()
                                  "ordering": "unknown", "evidence": "mask intersection; not proof of occlusion"})
     data = {"version": "0.2", "width": w, "height": h, "source_sha256": source_hash, "layers": layers,
             "overlaps": overlaps, "render_order": [layer["id"] for layer in layers],
-            "note": "Proposed paint order: objects then text. It is a rendering assumption, not inferred depth; review and edit render_order."}
+            "note": "Proposed paint order: objects, graphics, then text. Review and edit render_order."}
     scene_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return data
 
@@ -176,6 +186,13 @@ def data_uri(image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def box_slice(bbox, size):
+    x, y, width, height = bbox
+    if any(type(value) is not int for value in bbox) or width <= 0 or height <= 0:
+        raise ValueError(f"Raster geometry needs a positive integer bounding box: {bbox}")
+    return slice(max(0, y), max(0, min(size[1], y + height))), slice(max(0, x), max(0, min(size[0], x + width)))
 
 
 def inpaint_rgba(pixels, removal):
@@ -225,16 +242,22 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
     warnings = []
     objects = {}
     removal = np.zeros((h, w), np.uint8)
-    front_text = np.zeros_like(removal)
+    front_graphics = np.zeros_like(removal)
     for ident in reversed(order):
         item = by_id[ident]
-        if item["kind"] == "rect" or (item["kind"] == "text" and clean_plate):
+        if item["kind"] == "rect":
+            if not clean_plate and "source_bbox" in item:
+                region = box_slice(item["source_bbox"], (w, h))
+                front_graphics[region] = 255
+                removal[region] = 255
+            continue
+        if item["kind"] == "text" and clean_plate:
             continue
         if item["kind"] == "text":
             glyphs = glyph_mask(display, text_mask(item, (w, h)))
             if not glyphs.any():
                 warnings.append(f"{ident}: could not isolate glyphs; source text may remain visible")
-            front_text |= glyphs
+            front_graphics |= glyphs
             removal |= glyphs
             continue
         if item["kind"] != "object":
@@ -255,14 +278,14 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             continue
         left, top, right, bottom = bounds
         box = np.s_[top:bottom, left:right]
-        glyphs = coverage[box] & front_text[box]
-        donors = (coverage[box] > 0) & (glyphs == 0)
-        if glyphs.any() and donors.any():
-            cutout = inpaint_rgba(pixels[box], glyphs | (255 - coverage[box]))
+        occluded = coverage[box] & front_graphics[box]
+        donors = (coverage[box] > 0) & (occluded == 0)
+        if occluded.any() and donors.any():
+            cutout = inpaint_rgba(pixels[box], occluded | (255 - coverage[box]))
         else:
             cutout = pixels[box].copy()
-            if glyphs.any():
-                warnings.append(f"{ident}: insufficient object pixels to remove overlapping text")
+            if occluded.any():
+                warnings.append(f"{ident}: insufficient object pixels to remove overlapping graphics")
         cutout[:, :, 3] = np.minimum(pixels[box][:, :, 3], mask[box])
         objects[ident] = (bounds, Image.fromarray(cutout))
     # This is an approximate background; source pixels behind opaque objects are unavailable.
@@ -282,6 +305,8 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
     for ident in order:
         item = by_id[ident]
         group = ET.SubElement(svg, f"{{{ns}}}g", {"id": ident, "data-kind": item["kind"]})
+        if "role" in item:
+            group.set("data-role", item["role"])
         if item["kind"] == "object":
             if ident in objects:
                 bounds, cutout = objects[ident]

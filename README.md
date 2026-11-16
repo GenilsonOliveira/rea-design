@@ -69,6 +69,18 @@ Use `--mask "nome da camada" caminho.png` para adicionar uma camada manual (`man
 
 Se mover o recorte revelar artefatos do preenchimento automático, passe também `--background-plate fundo-sem-o-sujeito.png`. A imagem deve ter o tamanho do canvas. O SVG usa esse fundo sob os recortes e registra o hash da imagem na resposta da CLI.
 
+### Detectar grades e blocos de cor
+
+```powershell
+rea-design geometry referencia.png --out analise/geometria
+rea-design scene referencia.png --geometry analise/geometria/geometry.json --out analise/cena
+rea-design export-svg referencia.png --scene analise/cena/scene.json --out analise/editavel.svg
+```
+
+`geometry` detecta traços horizontais e verticais finos com apoio contínuo e preenche propostas de blocos quando quatro linhas delimitam uma célula de cor uniforme com contraste externo. `geometry-overlay.png` ajuda a revisar as propostas. O detector não busca blocos sem linhas delimitadoras nem grades diagonais ou curvas. A espessura exportada é de 1 px e a opacidade é estimada.
+
+`scene --geometry` pode ser combinado com `--ocr` e as opções de recorte. O SVG exporta cada forma como um `<rect>` separado. Edite suas coordenadas ou `fill` no editor SVG. Ao editar `scene.json`, conserve `source_bbox` para indicar a posição original da forma e altere `bbox` para movê-la. Sem `--clean-plate`, as regiões originais detectadas passam por preenchimento estimado. Para revelar uma foto coberta por um bloco, use uma foto limpa e alinhada quando disponível.
+
 `inspect` gera dimensões, hash, paleta aproximada, imagem normalizada, grade, mapa de bordas e quatro recortes com contexto. A paleta é quantizada sobre branco. `compare` exige imagens do mesmo tamanho e mede separadamente o erro RGB sobre branco e o erro no canal alfa. Produz também `alpha-difference.png`. A CLI bloqueia caminhos de saída que sobrescrevam suas entradas. Outros arquivos de saída existentes podem ser substituídos.
 
 `ocr` usa RapidOCR/ONNX localmente e gera texto, polígonos, confiança e uma imagem de verificação. Confiança alta não garante transcrição correta; confira letras decorativas e idiomas. `segment` produz máscaras de componentes de cor e caixas em coordenadas da imagem. São regiões visuais, não classes semânticas nem camadas originais. Opcionalmente, `--rect X Y LARGURA ALTURA` seleciona um retângulo aproximado em pixels para separar o primeiro plano via GrabCut, salvando uma máscara e um recorte transparente. O retângulo deve incluir o sujeito e deixar fundo fora dele; o resultado precisa de inspeção. `--colors` controla a quantização (2–16) e `--min-area` o limiar de área como fração da imagem (padrão 0,001). Saídas anteriores em uma pasta reutilizada podem permanecer; use sempre uma pasta nova.
