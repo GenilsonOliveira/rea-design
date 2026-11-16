@@ -4,6 +4,7 @@ from xml.etree import ElementTree as ET
 
 from PIL import Image, ImageColor
 
+from .ink_overlay import lift_title_ink
 from .vision import _deps
 
 
@@ -108,12 +109,21 @@ def title_cleanup_mask(image, title, protection, warnings, *, fit_layout=False):
     return removal
 
 
-def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title_font, title_behind):
+def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title_font, title_behind,
+                      title_overlays, moves_by_id):
     from .cli import flatten
     from .scene import append_title_lines, data_uri, inpaint_rgba, read_object_layer, scene_layers, svg_document
 
-    _, np = _deps()
+    cv2, np = _deps()
     by_id, order = scene_layers(scene)
+    overlays = dict(title_overlays)
+    if len(overlays) != len(title_overlays) or any(
+        ident not in by_id or by_id[ident]["kind"] != "text" or not isinstance(label, str) or not label.strip()
+        for ident, label in overlays.items()
+    ):
+        raise ValueError("Each --title-overlay needs a unique OCR text layer ID and a label")
+    if set(moves_by_id).difference(overlays):
+        raise ValueError("--title-only can move lifted text layers selected with --title-overlay")
     pixels = np.asarray(image)
     warnings = []
     coverages = {}
@@ -161,10 +171,20 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
     removal = title_cleanup_mask(display, title, protection, warnings, fit_layout=True)
     if not removal.any():
         raise ValueError("Could not isolate visible title ink. Review the title boxes and colors in the scene.")
+    overlay_removal = np.zeros_like(removal)
+    lifted = []
+    for ident, label in overlays.items():
+        bounds, asset = lift_title_ink(display, by_id[ident], title)
+        left, top, right, bottom = bounds
+        lifted.append((ident, label, left, top, asset))
+        overlay_removal[top:bottom, left:right] |= np.where(np.asarray(asset.getchannel("A")) > 0, 255, 0).astype(np.uint8)
+    if lifted:
+        overlay_removal = cv2.dilate(overlay_removal, np.ones((5, 5), np.uint8)) & (255 - protection)
+    edit_mask = removal | overlay_removal
     # Exclude the portrait from the donors, then copy back only the title cleanup.
-    filled = inpaint_rgba(pixels, removal | protection)
+    filled = inpaint_rgba(pixels, edit_mask | protection)
     base = pixels.copy()
-    base[removal > 0] = filled[removal > 0]
+    base[edit_mask > 0] = filled[edit_mask > 0]
     base[protection > 0] = 0
 
     namespace, svg = svg_document(image.size, "Localized editable title")
@@ -173,6 +193,16 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
                                             "height": str(height), "href": data_uri(Image.fromarray(base))})
     group = ET.SubElement(svg, f"{namespace}g", {"id": title["id"], "data-kind": "text-block"})
     append_title_lines(group, namespace, title, title_font)
+    overlay_report = []
+    for ident, label, left, top, asset in lifted:
+        layer = ET.SubElement(svg, f"{namespace}g", {"id": ident, "data-role": "title-overlay",
+                                                   "data-kind": "ink-cutout"})
+        if ident in moves_by_id:
+            layer.set("transform", moves_by_id[ident])
+        ET.SubElement(layer, f"{namespace}title").text = label
+        ET.SubElement(layer, f"{namespace}image", {"x": str(left), "y": str(top), "width": str(asset.width),
+                                                  "height": str(asset.height), "href": data_uri(asset)})
+        overlay_report.append({"layer": ident, "label": label, "bbox": [left, top, asset.width, asset.height]})
     for ident, coverage, bounds in reversed(foreground):
         left, top, right, bottom = bounds
         box = np.s_[top:bottom, left:right]
@@ -187,7 +217,9 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
     ET.ElementTree(svg).write(output, encoding="utf-8", xml_declaration=True)
     front_ids = [ident for ident, _, _ in reversed(foreground)]
     return {"svg": str(output), "mode": "title-only", "pixel_source_sha256": pixel_hash,
-            "render_order": ["background-title-cleaned", title["id"], *front_ids],
+            "render_order": ["background-title-cleaned", title["id"], *overlays, *front_ids],
+            "title_overlays": overlay_report,
             "title_foreground": [{"layer": ident, **evidence[ident]} for ident in front_ids],
             "cleaned_title_pixels": int(np.count_nonzero(removal)),
+            "cleaned_overlay_pixels": int(np.count_nonzero(overlay_removal)),
             "protected_foreground_pixels": int(np.count_nonzero(protection)), "warnings": warnings}

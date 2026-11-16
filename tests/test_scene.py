@@ -23,6 +23,46 @@ def embedded_image(node):
 
 @unittest.skipUnless(importlib.util.find_spec("cv2") and importlib.util.find_spec("numpy"), "install rea-design[vision]")
 class SceneTests(unittest.TestCase):
+    def test_lifted_ink_recovers_strokes_outside_the_ocr_seed_and_moves_on_its_own(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.png"
+            photo = Image.new("RGB", (180, 122), (222, 202, 177))
+            draw = ImageDraw.Draw(photo)
+            for left, right in ((25, 52), (62, 91), (105, 133), (140, 155)):
+                draw.rectangle((left, 53, right, 83), fill=(75, 50, 30))
+            draw.line([(35, 31), (65, 39), (83, 50), (100, 62), (115, 74), (139, 46)],
+                      fill=(117, 78, 48), width=5)
+            photo.save(source)
+            title = {"id": "title-001", "kind": "text-block", "bbox": [25, 53, 131, 31], "source_ids": [],
+                     "lines": [{"text": "OLD", "bbox": [25, 53, 131, 31], "fill": "#4b321e", "ink_fraction": .8}]}
+            script = {"id": "text-001", "kind": "text", "text": "ink", "fill": "#754e30",
+                      "bbox": [64, 33, 46, 28], "polygon": [[64, 33], [110, 33], [110, 61], [64, 61]]}
+            scene = {"width": photo.width, "height": photo.height,
+                     "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                     "layers": [script, title], "render_order": ["text-001", "title-001"]}
+            scene_file = root / "scene.json"
+            scene_file.write_text(json.dumps(scene), encoding="utf-8")
+            original, moved = root / "title.svg", root / "moved.svg"
+            options = {"title_only": True, "title_lines": ["NEW"], "title_overlays": [("text-001", "Handwriting")]}
+            result = export_svg(source, scene_file, original, **options)
+            export_svg(source, scene_file, moved, moves=[("text-001", 9, -8)], **options)
+            self.assertEqual(result["render_order"], ["background-title-cleaned", "title-001", "text-001"])
+            before, after = [ET.parse(path).getroot() for path in (original, moved)]
+            layer = before.find("s:g[@id='text-001']", SVG)
+            self.assertEqual(layer.find("s:title", SVG).text, "Handwriting")
+            ink_node = layer.find("s:image", SVG)
+            ink = embedded_image(ink_node).convert("RGBA")
+            offset_x, offset_y = int(ink_node.get("x")), int(ink_node.get("y"))
+            self.assertLess(offset_x, script["bbox"][0])
+            self.assertGreater(offset_x + ink.width, script["bbox"][0] + script["bbox"][2])
+            self.assertGreater(ink.getpixel((117 - offset_x, 72 - offset_y))[3], 180)
+            self.assertEqual(ink.getpixel((72 - offset_x, 72 - offset_y))[3], 0)
+            base = embedded_image(before.find("s:image[@id='background-title-cleaned']", SVG)).convert("RGB")
+            self.assertEqual(base.getpixel((37, 31)), photo.getpixel((10, 10)))
+            layer.set("transform", "translate(9 -8)")
+            self.assertEqual(ET.tostring(before), ET.tostring(after))
+
     def test_local_title_replacement_cleans_old_letters_and_keeps_foreground_pixels(self):
         import numpy as np
 

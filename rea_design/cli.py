@@ -174,6 +174,8 @@ def main():
     p.add_argument("--title-only", action="store_true", help="Clean and replace the title while preserving the rest of the source")
     p.add_argument("--title-behind", action="append", default=[], metavar="LAYER_ID",
                    help="Explicit foreground object for --title-only; repeat for multiple layers")
+    p.add_argument("--title-overlay", nargs=2, action="append", default=[], metavar=("TEXT_LAYER_ID", "LABEL"),
+                   help="Lift ink from an OCR layer and paint it above the replacement title")
     p.add_argument("--title-font", metavar="FONT_FILE", help="Measure the title using a local TTF or OTF")
     p = sub.add_parser("assemble", help="Detect objects, suggest layers and build an editable SVG in one command")
     p.add_argument("image")
@@ -231,7 +233,8 @@ def main():
                                 background_plate=args.background_plate, title_font=args.title_font,
                                 repair_plate=args.repair_plate, repair_model=args.repair_model,
                                 generative_repairs=args.generative_repair, moves=args.move, title_lines=args.title_line,
-                                title_only=args.title_only, title_behind=args.title_behind)
+                                title_only=args.title_only, title_behind=args.title_behind,
+                                title_overlays=args.title_overlay)
         # JSON remains lossless even when Windows redirects stdout to a legacy code page.
         print(json.dumps(result, indent=2, ensure_ascii=True))
     except (OSError, ValueError, UnidentifiedImageError) as exc:

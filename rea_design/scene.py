@@ -374,14 +374,14 @@ def object_overlap(coverage, occluders, seen_masks, box):
 
 def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None, title_font=None,
                repair_plate=None, repair_model=None, generative_repairs=(), moves=(), title_lines=None,
-               title_only=False, title_behind=()):
+               title_only=False, title_behind=(), title_overlays=()):
     cv2, np = _deps()
     validate_repair_options(repair_plate, repair_model)
-    if title_behind and not title_only:
-        raise ValueError("--title-behind requires --title-only")
-    if title_only and (title_lines is None or any((moves, clean_plate, background_plate, repair_plate,
+    if (title_behind or title_overlays) and not title_only:
+        raise ValueError("--title-behind and --title-overlay require --title-only")
+    if title_only and (title_lines is None or any((clean_plate, background_plate, repair_plate,
                                                     repair_model, generative_repairs))):
-        raise ValueError("--title-only requires --title-line, using the source image without moves or plates")
+        raise ValueError("--title-only requires --title-line and uses the source image without plates")
     if generative_repairs and (repair_plate or repair_model):
         raise ValueError("Choose generative repair, a repair plate, or LaMa")
     scene_path = Path(scene_path).resolve()
@@ -413,7 +413,7 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             line["text"] = text
         if title_only:
             return export_title_edit(image, pixel_hash, scene, scene_path, output, titles[0], title_font,
-                                     title_behind)
+                                     title_behind, title_overlays, moves_by_id)
     repair = None
     if repair_plate:
         protect_inputs((output,), repair_plate)
