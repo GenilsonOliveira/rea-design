@@ -14,6 +14,16 @@ def validate_repair_options(repair_plate, repair_model):
         raise ValueError(f"LaMa ONNX model not found: {repair_model}")
 
 
+def expand_overlap(hidden, radius=None):
+    cv2, _ = _deps()
+    if radius is None:
+        _, _, width, height = cv2.boundingRect(hidden)
+        radius = max(2, round(max(width, height) * .012))
+    diameter = 2 * radius + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (diameter, diameter))
+    return cv2.dilate(hidden, kernel)
+
+
 class LamaRepair:
     def __init__(self, model):
         try:
@@ -38,10 +48,7 @@ class LamaRepair:
     def repair(self, pixels, hidden):
         cv2, np = _deps()
         height, width = hidden.shape
-        x, y, w, h = cv2.boundingRect(hidden)
-        radius = max(2, round(max(w, h) * .012))
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
-        expanded = cv2.dilate(hidden, kernel)
+        expanded = expand_overlap(hidden)
         x, y, w, h = cv2.boundingRect(expanded)
         side = min(max(width, height), max(MODEL_SIZE, round(1.45 * max(w, h))))
         left = min(max(0, x + (w - side) // 2), max(0, width - side))

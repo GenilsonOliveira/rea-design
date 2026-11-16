@@ -10,6 +10,7 @@ from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 from PIL import Image, ImageDraw
+from rea_design.generative import prepare_repair
 from rea_design.scene import make_scene, export_svg
 
 SVG = {"s": "http://www.w3.org/2000/svg"}
@@ -21,6 +22,48 @@ def embedded_image(node):
 
 @unittest.skipUnless(importlib.util.find_spec("cv2") and importlib.util.find_spec("numpy"), "install rea-design[vision]")
 class SceneTests(unittest.TestCase):
+    def test_generative_repair_is_bounded_and_rejects_a_stale_manifest(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.png"
+            photo = Image.new("RGBA", (50, 50), "blue")
+            ImageDraw.Draw(photo).rectangle((18, 22, 22, 28), fill="red")
+            photo.save(source)
+            mask_inputs = []
+            for name, bounds in (("portrait", (5, 5, 40, 40)), ("glasses", (18, 22, 22, 28))):
+                path = root / f"{name}.png"
+                mask = Image.new("L", photo.size)
+                ImageDraw.Draw(mask).rectangle(bounds, fill=255)
+                mask.save(path)
+                mask_inputs.append((name, path))
+            make_scene(source, None, None, root / "scene", manual=mask_inputs)
+            scene_path = root / "scene/scene.json"
+            job = prepare_repair(source, scene_path, root / "repair", margin=4)
+            self.assertEqual(job["layer"], "manual-001")
+            self.assertEqual(job["masked_pixels"], 35)
+            manifest, draft = Path(job["job"]), root / "draft.png"
+            # The generator changes the entire crop, including pixels that must stay blue.
+            Image.new("RGB", (100, 100), "green").save(draft)
+            svg_path = root / "edit.svg"
+            options = {"generative_repairs": [(manifest, draft)], "moves": [("manual-002", 0, -10)]}
+            result = export_svg(source, scene_path, svg_path, **options)
+            self.assertEqual(result["repaired_overlaps"], [{"layer": "manual-001", "pixels": 35}])
+            self.assertEqual(result["generative_repairs"][0]["layer"], "manual-001")
+            svg = ET.parse(svg_path)
+            portrait = embedded_image(svg.find(".//s:g[@id='manual-001']/s:image", SVG))
+            self.assertEqual(portrait.getpixel((15, 20)), (0, 128, 0, 255))
+            box = (5, 5, 41, 41)
+            support = np.asarray(Image.open(job["mask"]).crop(box)) > 0
+            np.testing.assert_array_equal(np.asarray(portrait)[~support], np.asarray(photo.crop(box))[~support])
+            self.assertEqual(svg.find(".//s:g[@id='manual-002']", SVG).get("transform"), "translate(0 -10)")
+            stale = json.loads(manifest.read_text(encoding="utf-8"))
+            stale["overlap_sha256"] = "wrong"
+            manifest.write_text(json.dumps(stale), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "does not match the pixel source or overlap"):
+                export_svg(source, scene_path, svg_path, **options)
+
     def test_automatic_repair_uses_only_the_overlap_behind_moved_object(self):
         import numpy as np
 

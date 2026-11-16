@@ -134,6 +134,18 @@ Para `--repair-model`, instale o extra `vision` e salve o [checkpoint LaMa de 51
 
 Quando houver uma foto alinhada que mostre a área oculta, use `--repair-plate` no lugar de `--repair-model`. Sem essas opções, a CLI usa preenchimento clássico e sinaliza a estimativa. Para controlar o fundo do canvas, use a opção independente `--background-plate`.
 
+### Preenchimento generativo de detalhes ocultos
+
+```powershell
+rea-design prepare-repair referencia.png --scene analise/scene/scene.json --clean-plate retrato-com-oculos.png --out analise/reparo
+# Use context.png e mask.png no seu gerador de imagens e salve o resultado em analise/reparo/gerado.png.
+rea-design export-svg referencia.png --scene analise/scene/scene.json --clean-plate retrato-com-oculos.png --generative-repair analise/reparo/repair.json analise/reparo/gerado.png --move grounded-001 32 -120 --title-line NOVA --title-line FORMA --out analise/editado.svg
+```
+
+`prepare-repair` usa as interseções ordenadas da cena para escolher o recorte e criar a máscara. Branco marca a região editável. Use `--layer` para escolher a camada que recebe o preenchimento quando houver mais de uma. `--margin` ajusta a largura da transição em pixels da imagem original, por exemplo para incluir a sombra projetada pelo objeto.
+
+Peça ao gerador para reconstruir o detalhe dentro da máscara e devolver o recorte inteiro, opaco, com o mesmo enquadramento e proporção. Pode usar a ferramenta de imagens do agente ou um modelo local compatível. O rea-design prepara, alinha e compõe o recorte. A geração de pixels fica a cargo da ferramenta escolhida. Na exportação, o rea-design confere a fonte e o recorte pela cena, tenta corrigir pequenos deslocamentos pelo contexto e aplica os pixels dentro da máscara com uma transição suave. Repita `--generative-repair` para diferentes camadas da mesma cena. Os detalhes reconstruídos são uma síntese visual.
+
 ## Desenvolvimento
 
 ```bash

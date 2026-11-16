@@ -151,6 +151,13 @@ def main():
     p.add_argument("--mask", nargs=2, metavar=("LABEL", "PNG"), action="append", default=[], help="Add a full-canvas grayscale or alpha mask")
     p.add_argument("--replace-mask", nargs=2, metavar=("ID", "PNG"), action="append", default=[], help="Replace a detected object mask and keep its ID")
     p.add_argument("--out", required=True)
+    p = sub.add_parser("prepare-repair", help="Write an overlap crop and inpainting mask for an image generator")
+    p.add_argument("image")
+    p.add_argument("--scene", required=True)
+    p.add_argument("--clean-plate")
+    p.add_argument("--layer", help="Receiving object ID, required when multiple layers have overlaps")
+    p.add_argument("--margin", type=int, help="Feather width outside the overlap, in source pixels")
+    p.add_argument("--out", required=True)
     p = sub.add_parser("export-svg", help="Export a reviewed scene as editable SVG")
     p.add_argument("image")
     p.add_argument("--scene", required=True)
@@ -160,6 +167,8 @@ def main():
     repair = p.add_mutually_exclusive_group()
     repair.add_argument("--repair-plate", help="Aligned donor image for the pixels under foreground objects")
     repair.add_argument("--repair-model", metavar="LAMA_ONNX", help="Recompose inferred overlaps using local LaMa")
+    repair.add_argument("--generative-repair", nargs=2, metavar=("REPAIR_JSON", "GENERATED_PNG"),
+                        action="append", default=[], help="Apply a masked generative edit. Repeat for distinct layers.")
     p.add_argument("--move", nargs=3, metavar=("LAYER_ID", "DX", "DY"), action="append", default=[])
     p.add_argument("--title-line", action="append", help="Replace successive lines of the single editable title")
     p.add_argument("--title-font", metavar="FONT_FILE", help="Measure the title using a local TTF or OTF")
@@ -204,6 +213,10 @@ def main():
             result = make_scene(args.image, args.semantic, args.ocr, args.out, geometry_json=args.geometry,
                                 typography_json=args.typography, grounded_json=args.grounded, grounded_source=args.grounded_source,
                                 grabcut=args.grabcut, manual=args.mask, replacements=args.replace_mask)
+        elif args.command == "prepare-repair":
+            from .generative import prepare_repair
+            result = prepare_repair(args.image, args.scene, args.out, clean_plate=args.clean_plate,
+                                    layer=args.layer, margin=args.margin)
         elif args.command == "assemble":
             from .assemble import assemble
             result = assemble(args.image, args.prompt, args.out, models_dir=args.models_dir, threshold=args.threshold,
@@ -214,7 +227,7 @@ def main():
             result = export_svg(args.image, args.scene, args.out, clean_plate=args.clean_plate,
                                 background_plate=args.background_plate, title_font=args.title_font,
                                 repair_plate=args.repair_plate, repair_model=args.repair_model,
-                                moves=args.move, title_lines=args.title_line)
+                                generative_repairs=args.generative_repair, moves=args.move, title_lines=args.title_line)
         # JSON remains lossless even when Windows redirects stdout to a legacy code page.
         print(json.dumps(result, indent=2, ensure_ascii=True))
     except (OSError, ValueError, UnidentifiedImageError) as exc:
