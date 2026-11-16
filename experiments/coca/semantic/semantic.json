@@ -1,0 +1,46 @@
+{
+  "width": 1500,
+  "height": 1700,
+  "source_sha256": "68e51e2fb6aeb189adbe84cd37e6ffb486608d583cdc41d4369b4af7de6f55e8",
+  "model": "FCN-ResNet50-12 (ONNX Model Zoo)",
+  "model_sha256": "eb5017d1b80372eb0b58552655274698817ba2e774437e2c2d3c0a613d2e99bd",
+  "items": [
+    {
+      "id": "object-001",
+      "class": "person",
+      "bbox": [
+        416,
+        168,
+        349,
+        797
+      ],
+      "area_pixels": 143374,
+      "mask": "masks/object-001.png"
+    },
+    {
+      "id": "object-002",
+      "class": "person",
+      "bbox": [
+        306,
+        188,
+        162,
+        142
+      ],
+      "area_pixels": 14207,
+      "mask": "masks/object-002.png"
+    },
+    {
+      "id": "object-003",
+      "class": "person",
+      "bbox": [
+        263,
+        624,
+        124,
+        136
+      ],
+      "area_pixels": 8622,
+      "mask": "masks/object-003.png"
+    }
+  ],
+  "note": "Pixelwise semantic classes; disconnected components are not guaranteed instances. Unknown classes become background."
+}

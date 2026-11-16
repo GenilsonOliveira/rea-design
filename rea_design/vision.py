@@ -1,5 +1,6 @@
 """Optional local OCR and image segmentation. Coordinates are original pixels."""
 import json
+import hashlib
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -37,7 +38,7 @@ def ocr(source, output):
                       "confidence": round(float(confidence), 4), "polygon": points,
                       "bbox": [round(min(xs), 2), round(min(ys), 2), round(max(xs)-min(xs), 2), round(max(ys)-min(ys), 2)]})
         draw.line([tuple(p) for p in points] + [tuple(points[0])], fill="#ff00b7", width=2)
-    data = {"width": image.width, "height": image.height, "engine": "RapidOCR ONNX Runtime", "items": words,
+    data = {"width": image.width, "height": image.height, "source_sha256": hashlib.sha256(Path(source).read_bytes()).hexdigest(), "engine": "RapidOCR ONNX Runtime", "items": words,
             "note": "Text and confidence are model estimates. Check stylized, small or rotated text visually."}
     (output / "ocr.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     overlay.save(output / "ocr-overlay.png")

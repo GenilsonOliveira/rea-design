@@ -1,0 +1,656 @@
+{
+  "version": "0.1",
+  "width": 1500,
+  "height": 1700,
+  "source_sha256": "68e51e2fb6aeb189adbe84cd37e6ffb486608d583cdc41d4369b4af7de6f55e8",
+  "layers": [
+    {
+      "id": "object-001",
+      "kind": "object",
+      "label": "person",
+      "bbox": [
+        416,
+        168,
+        349,
+        797
+      ],
+      "mask": "../semantic/masks/object-001.png",
+      "evidence": "semantic mask",
+      "depth": "unknown"
+    },
+    {
+      "id": "object-002",
+      "kind": "object",
+      "label": "person",
+      "bbox": [
+        306,
+        188,
+        162,
+        142
+      ],
+      "mask": "../semantic/masks/object-002.png",
+      "evidence": "semantic mask",
+      "depth": "unknown"
+    },
+    {
+      "id": "object-003",
+      "kind": "object",
+      "label": "person",
+      "bbox": [
+        263,
+        624,
+        124,
+        136
+      ],
+      "mask": "../semantic/masks/object-003.png",
+      "evidence": "semantic mask",
+      "depth": "unknown"
+    },
+    {
+      "id": "text-001",
+      "kind": "text",
+      "text": "Stop!",
+      "bbox": [
+        877.0,
+        160.0,
+        367.0,
+        152.0
+      ],
+      "polygon": [
+        [
+          877.0,
+          172.0
+        ],
+        [
+          1240.0,
+          160.0
+        ],
+        [
+          1244.0,
+          300.0
+        ],
+        [
+          882.0,
+          312.0
+        ]
+      ],
+      "confidence": 0.9952,
+      "depth": "unknown",
+      "fill": "#373737",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-002",
+      "kind": "text",
+      "text": "Refresh",
+      "bbox": [
+        815.0,
+        291.0,
+        394.0,
+        157.0
+      ],
+      "polygon": [
+        [
+          815.0,
+          342.0
+        ],
+        [
+          1195.0,
+          291.0
+        ],
+        [
+          1209.0,
+          397.0
+        ],
+        [
+          829.0,
+          448.0
+        ]
+      ],
+      "confidence": 0.9972,
+      "depth": "unknown",
+      "fill": "#3b3b3b",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-003",
+      "kind": "text",
+      "text": "yourself",
+      "bbox": [
+        893.0,
+        409.0,
+        423.0,
+        135.0
+      ],
+      "polygon": [
+        [
+          893.0,
+          440.0
+        ],
+        [
+          1308.0,
+          409.0
+        ],
+        [
+          1316.0,
+          512.0
+        ],
+        [
+          901.0,
+          544.0
+        ]
+      ],
+      "confidence": 0.999,
+      "depth": "unknown",
+      "fill": "#3e3e3e",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-004",
+      "kind": "text",
+      "text": "What doyou",
+      "bbox": [
+        1053.0,
+        577.0,
+        290.0,
+        45.0
+      ],
+      "polygon": [
+        [
+          1054.0,
+          577.0
+        ],
+        [
+          1343.0,
+          581.0
+        ],
+        [
+          1342.0,
+          622.0
+        ],
+        [
+          1053.0,
+          618.0
+        ]
+      ],
+      "confidence": 0.912,
+      "depth": "unknown",
+      "fill": "#4b4b4b",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-005",
+      "kind": "text",
+      "text": "think all the",
+      "bbox": [
+        1050.0,
+        618.0,
+        299.0,
+        52.0
+      ],
+      "polygon": [
+        [
+          1050.0,
+          623.0
+        ],
+        [
+          1348.0,
+          618.0
+        ],
+        [
+          1349.0,
+          665.0
+        ],
+        [
+          1051.0,
+          670.0
+        ]
+      ],
+      "confidence": 0.9545,
+      "depth": "unknown",
+      "fill": "#4e4e4e",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-006",
+      "kind": "text",
+      "text": "red signs are",
+      "bbox": [
+        1051.0,
+        672.0,
+        299.0,
+        47.0
+      ],
+      "polygon": [
+        [
+          1051.0,
+          672.0
+        ],
+        [
+          1350.0,
+          672.0
+        ],
+        [
+          1350.0,
+          719.0
+        ],
+        [
+          1051.0,
+          719.0
+        ]
+      ],
+      "confidence": 0.9595,
+      "depth": "unknown",
+      "fill": "#4f4f4f",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-007",
+      "kind": "text",
+      "text": "for ???.",
+      "bbox": [
+        1052.0,
+        719.0,
+        175.0,
+        44.0
+      ],
+      "polygon": [
+        [
+          1052.0,
+          719.0
+        ],
+        [
+          1227.0,
+          719.0
+        ],
+        [
+          1227.0,
+          763.0
+        ],
+        [
+          1052.0,
+          763.0
+        ]
+      ],
+      "confidence": 0.893,
+      "depth": "unknown",
+      "fill": "#515151",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-008",
+      "kind": "text",
+      "text": "Drink",
+      "bbox": [
+        791.0,
+        732.0,
+        99.0,
+        39.0
+      ],
+      "polygon": [
+        [
+          791.0,
+          741.0
+        ],
+        [
+          887.0,
+          732.0
+        ],
+        [
+          890.0,
+          762.0
+        ],
+        [
+          794.0,
+          771.0
+        ]
+      ],
+      "confidence": 0.94,
+      "depth": "unknown",
+      "fill": "#a0a0a0",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-009",
+      "kind": "text",
+      "text": "oca",
+      "bbox": [
+        776.0,
+        789.0,
+        76.0,
+        36.0
+      ],
+      "polygon": [
+        [
+          776.0,
+          789.0
+        ],
+        [
+          852.0,
+          789.0
+        ],
+        [
+          852.0,
+          825.0
+        ],
+        [
+          776.0,
+          825.0
+        ]
+      ],
+      "confidence": 0.8112,
+      "depth": "unknown",
+      "fill": "#4b4b4b",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-010",
+      "kind": "text",
+      "text": "oot",
+      "bbox": [
+        859.0,
+        796.0,
+        66.0,
+        32.0
+      ],
+      "polygon": [
+        [
+          859.0,
+          796.0
+        ],
+        [
+          925.0,
+          796.0
+        ],
+        [
+          925.0,
+          828.0
+        ],
+        [
+          859.0,
+          828.0
+        ]
+      ],
+      "confidence": 0.8216,
+      "depth": "unknown",
+      "fill": "#484848",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-011",
+      "kind": "text",
+      "text": "Drink",
+      "bbox": [
+        131.0,
+        1056.0,
+        264.0,
+        66.0
+      ],
+      "polygon": [
+        [
+          131.0,
+          1056.0
+        ],
+        [
+          395.0,
+          1056.0
+        ],
+        [
+          395.0,
+          1122.0
+        ],
+        [
+          131.0,
+          1122.0
+        ]
+      ],
+      "confidence": 0.999,
+      "depth": "unknown",
+      "fill": "#454545",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-012",
+      "kind": "text",
+      "text": "CocaCola",
+      "bbox": [
+        313.0,
+        1126.0,
+        940.0,
+        390.0
+      ],
+      "polygon": [
+        [
+          350.0,
+          1126.0
+        ],
+        [
+          1253.0,
+          1256.0
+        ],
+        [
+          1216.0,
+          1516.0
+        ],
+        [
+          313.0,
+          1386.0
+        ]
+      ],
+      "confidence": 0.8055,
+      "depth": "unknown",
+      "fill": "#414141",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-013",
+      "kind": "text",
+      "text": "TRADEA",
+      "bbox": [
+        512.0,
+        1362.0,
+        78.0,
+        25.0
+      ],
+      "polygon": [
+        [
+          512.0,
+          1366.0
+        ],
+        [
+          589.0,
+          1362.0
+        ],
+        [
+          590.0,
+          1383.0
+        ],
+        [
+          513.0,
+          1387.0
+        ]
+      ],
+      "confidence": 0.9523,
+      "depth": "unknown",
+      "fill": "#dcdcdc",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-014",
+      "kind": "text",
+      "text": "5",
+      "bbox": [
+        1196.0,
+        1387.0,
+        187.0,
+        224.0
+      ],
+      "polygon": [
+        [
+          1234.0,
+          1387.0
+        ],
+        [
+          1383.0,
+          1417.0
+        ],
+        [
+          1344.0,
+          1611.0
+        ],
+        [
+          1196.0,
+          1581.0
+        ]
+      ],
+      "confidence": 0.9993,
+      "depth": "unknown",
+      "fill": "#656565",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-015",
+      "kind": "text",
+      "text": "Delicious and Refreshing",
+      "bbox": [
+        234.0,
+        1448.0,
+        921.0,
+        107.0
+      ],
+      "polygon": [
+        [
+          236.0,
+          1448.0
+        ],
+        [
+          1155.0,
+          1469.0
+        ],
+        [
+          1153.0,
+          1555.0
+        ],
+        [
+          234.0,
+          1534.0
+        ]
+      ],
+      "confidence": 0.9781,
+      "depth": "unknown",
+      "fill": "#606060",
+      "fill_evidence": "two-color estimate; verify visually"
+    },
+    {
+      "id": "text-016",
+      "kind": "text",
+      "text": "The Coca-Cola Company,Atlanta, Ga.",
+      "bbox": [
+        118.0,
+        1583.0,
+        642.0,
+        39.0
+      ],
+      "polygon": [
+        [
+          118.0,
+          1583.0
+        ],
+        [
+          760.0,
+          1589.0
+        ],
+        [
+          760.0,
+          1622.0
+        ],
+        [
+          118.0,
+          1616.0
+        ]
+      ],
+      "confidence": 0.9641,
+      "depth": "unknown",
+      "fill": "#636363",
+      "fill_evidence": "two-color estimate; verify visually"
+    }
+  ],
+  "overlaps": [
+    {
+      "layers": [
+        "text-001",
+        "text-002"
+      ],
+      "intersection_pixels": 683,
+      "ordering": "unknown",
+      "evidence": "mask intersection; not proof of occlusion"
+    },
+    {
+      "layers": [
+        "text-004",
+        "text-005"
+      ],
+      "intersection_pixels": 397,
+      "ordering": "unknown",
+      "evidence": "mask intersection; not proof of occlusion"
+    },
+    {
+      "layers": [
+        "text-006",
+        "text-007"
+      ],
+      "intersection_pixels": 176,
+      "ordering": "unknown",
+      "evidence": "mask intersection; not proof of occlusion"
+    },
+    {
+      "layers": [
+        "text-012",
+        "text-013"
+      ],
+      "intersection_pixels": 1720,
+      "ordering": "unknown",
+      "evidence": "mask intersection; not proof of occlusion"
+    },
+    {
+      "layers": [
+        "text-012",
+        "text-014"
+      ],
+      "intersection_pixels": 626,
+      "ordering": "unknown",
+      "evidence": "mask intersection; not proof of occlusion"
+    },
+    {
+      "layers": [
+        "text-012",
+        "text-015"
+      ],
+      "intersection_pixels": 6347,
+      "ordering": "unknown",
+      "evidence": "mask intersection; not proof of occlusion"
+    }
+  ],
+  "render_order": [
+    "object-001",
+    "object-002",
+    "object-003",
+    "text-001",
+    "text-002",
+    "text-003",
+    "text-004",
+    "text-005",
+    "text-006",
+    "text-007",
+    "text-008",
+    "text-009",
+    "text-010",
+    "text-011",
+    "text-012",
+    "text-013",
+    "text-014",
+    "text-015",
+    "text-016"
+  ],
+  "note": "Proposed paint order: objects then text. It is a rendering assumption, not inferred depth; review and edit render_order."
+}

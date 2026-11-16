@@ -97,15 +97,35 @@ def main():
     p.add_argument("--rect", type=int, nargs=4, metavar=("X", "Y", "WIDTH", "HEIGHT"))
     p.add_argument("--colors", type=int, default=8)
     p.add_argument("--min-area", type=float, default=0.001)
+    p = sub.add_parser("semantic", help="Run FCN semantic segmentation with a local ONNX model")
+    p.add_argument("image")
+    p.add_argument("--model", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--min-area", type=float, default=0.002)
+    p = sub.add_parser("scene", help="Build a reviewable layer map from OCR and semantic evidence")
+    p.add_argument("image")
+    p.add_argument("--semantic", required=True)
+    p.add_argument("--ocr", required=True)
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("export-svg", help="Export a reviewed scene as editable SVG")
+    p.add_argument("image")
+    p.add_argument("--scene", required=True)
+    p.add_argument("--out", required=True)
     args = parser.parse_args()
     try:
         if args.command == "inspect":
             result = inspect(args.image, args.out)
         elif args.command == "compare":
             result = compare(args.reference, args.candidate, args.out)
-        else:
+        elif args.command in ("ocr", "segment"):
             from .vision import ocr, segment
             result = ocr(args.image, args.out) if args.command == "ocr" else segment(args.image, args.out, args.rect, args.colors, args.min_area)
+        elif args.command == "semantic":
+            from .semantic import semantic
+            result = semantic(args.image, args.out, args.model, args.min_area)
+        else:
+            from .scene import make_scene, export_svg
+            result = make_scene(args.image, args.semantic, args.ocr, args.out) if args.command == "scene" else export_svg(args.image, args.scene, args.out)
         print(json.dumps(result, indent=2, ensure_ascii=False))
     except (OSError, ValueError, UnidentifiedImageError) as exc:
         print(f"rea-design: {exc}", file=sys.stderr)
