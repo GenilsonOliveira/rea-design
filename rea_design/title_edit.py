@@ -5,6 +5,7 @@ from xml.etree import ElementTree as ET
 from PIL import Image, ImageColor
 
 from .ink_overlay import lift_title_ink
+from .paper_repair import restore_paper
 from .vision import _deps
 
 
@@ -182,7 +183,9 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
         overlay_removal = cv2.dilate(overlay_removal, np.ones((5, 5), np.uint8)) & (255 - protection)
     edit_mask = removal | overlay_removal
     # Exclude the portrait from the donors, then copy back only the title cleanup.
-    filled = inpaint_rgba(pixels, edit_mask | protection)
+    excluded = edit_mask | protection
+    filled = inpaint_rgba(pixels, excluded)
+    paper_pixels = restore_paper(pixels, filled, overlay_removal, excluded)
     base = pixels.copy()
     base[edit_mask > 0] = filled[edit_mask > 0]
     base[protection > 0] = 0
@@ -221,5 +224,5 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
             "title_overlays": overlay_report,
             "title_foreground": [{"layer": ident, **evidence[ident]} for ident in front_ids],
             "cleaned_title_pixels": int(np.count_nonzero(removal)),
-            "cleaned_overlay_pixels": int(np.count_nonzero(overlay_removal)),
+            "cleaned_overlay_pixels": int(np.count_nonzero(overlay_removal)), "paper_texture_pixels": paper_pixels,
             "protected_foreground_pixels": int(np.count_nonzero(protection)), "warnings": warnings}

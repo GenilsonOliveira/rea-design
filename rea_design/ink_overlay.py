@@ -7,12 +7,16 @@ from PIL import Image, ImageColor
 from .vision import _deps
 
 
-def local_background(crop, line_height):
-    cv2, np = _deps()
-    pixels = crop.reshape(-1, 3)
+def dominant_rgb(pixels):
+    _, np = _deps()
     _, groups, counts = np.unique((pixels.astype(np.uint8) // 16), axis=0,
                                   return_inverse=True, return_counts=True)
-    color = np.median(pixels[groups.ravel() == counts.argmax()], axis=0)
+    return np.median(pixels[groups.ravel() == counts.argmax()], axis=0)
+
+
+def local_background(crop, line_height):
+    cv2, np = _deps()
+    color = dominant_rgb(crop.reshape(-1, 3))
     known = (np.linalg.norm(crop - color, axis=2) < 21).astype(np.float32)
     sigma = max(2, line_height / 3)
     support = cv2.GaussianBlur(known, (0, 0), sigma)[:, :, None]
