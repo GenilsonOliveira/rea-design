@@ -81,6 +81,19 @@ rea-design export-svg referencia.png --scene analise/cena/scene.json --out anali
 
 `scene --geometry` pode ser combinado com `--ocr` e as opções de recorte. O SVG exporta cada forma como um `<rect>` separado. Edite suas coordenadas ou `fill` no editor SVG. Ao editar `scene.json`, conserve `source_bbox` para indicar a posição original da forma e altere `bbox` para movê-la. Sem `--clean-plate`, as regiões originais detectadas passam por preenchimento estimado. Para revelar uma foto coberta por um bloco, use uma foto limpa e alinhada quando disponível.
 
+### Reconstruir um título editável
+
+```powershell
+rea-design ocr referencia.png --out analise/ocr
+rea-design typography referencia.png --ocr analise/ocr/ocr.json --out analise/tipografia
+rea-design scene referencia.png --ocr analise/ocr/ocr.json --typography analise/tipografia/typography.json --out analise/cena
+rea-design export-svg referencia.png --scene analise/cena/scene.json --out analise/editavel.svg
+```
+
+`typography` propõe o título dominante. Agrupa trechos de OCR alinhados e próximos, mede a extensão dos pixels das letras e repete a leitura nas linhas separadas. O relatório inclui caixa, cor, confiança e cobertura de tinta por linha, além de uma sugestão de fonte. Títulos muito decorativos, inclinados ou com contraste baixo precisam de revisão. Veja `typography-overlay.png` para conferir as caixas.
+
+O título aparece como um grupo `text-block` com uma tag SVG `<text>` por linha. Para ajustar a frase ao mesmo espaço, edite `lines[].text` no `scene.json` e exporte novamente. Em renderizadores com suporte a `textLength`, é possível editar o texto diretamente no SVG. Use `export-svg --title-font caminho.ttf` para medir as letras do texto final com um arquivo local e calcular também a transformação geométrica. O editor deve ter acesso à família usada. O SVG guarda texto editável e referencia a fonte pelo nome. Opcionalmente, `--clean-plate foto-alinhada.png` preserva a foto de base ao trocar o título.
+
 `inspect` gera dimensões, hash, paleta aproximada, imagem normalizada, grade, mapa de bordas e quatro recortes com contexto. A paleta é quantizada sobre branco. `compare` exige imagens do mesmo tamanho e mede separadamente o erro RGB sobre branco e o erro no canal alfa. Produz também `alpha-difference.png`. A CLI bloqueia caminhos de saída que sobrescrevam suas entradas. Outros arquivos de saída existentes podem ser substituídos.
 
 `ocr` usa RapidOCR/ONNX localmente e gera texto, polígonos, confiança e uma imagem de verificação. Confiança alta não garante transcrição correta; confira letras decorativas e idiomas. `segment` produz máscaras de componentes de cor e caixas em coordenadas da imagem. São regiões visuais, não classes semânticas nem camadas originais. Opcionalmente, `--rect X Y LARGURA ALTURA` seleciona um retângulo aproximado em pixels para separar o primeiro plano via GrabCut, salvando uma máscara e um recorte transparente. O retângulo deve incluir o sujeito e deixar fundo fora dele; o resultado precisa de inspeção. `--colors` controla a quantização (2–16) e `--min-area` o limiar de área como fração da imagem (padrão 0,001). Saídas anteriores em uma pasta reutilizada podem permanecer; use sempre uma pasta nova.

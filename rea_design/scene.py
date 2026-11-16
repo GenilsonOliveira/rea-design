@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from PIL import Image
+from PIL import Image, ImageFont
 from .cli import flatten, load, protect_inputs
 from .vision import _deps
 
@@ -83,16 +83,17 @@ def read_mask(mask_bytes, size):
         return image.convert("L")
 
 
-def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, grabcut=(), manual=(), replacements=()):
+def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, typography_json=None,
+               grabcut=(), manual=(), replacements=()):
     _, np = _deps()
     image = flatten(load(source))
     w, h = image.size
     source_hash = sha(source)
     output = Path(output).resolve()
     scene_file = output / "scene.json"
-    if not (semantic_json or ocr_json or geometry_json or grabcut or manual):
-        raise ValueError("Provide at least one of --semantic, --ocr, --geometry, --grabcut and --mask")
-    evidence_files = [path for path in (semantic_json, ocr_json, geometry_json, *grabcut) if path is not None]
+    if not (semantic_json or ocr_json or geometry_json or typography_json or grabcut or manual):
+        raise ValueError("Provide at least one of --semantic, --ocr, --geometry, --typography, --grabcut and --mask")
+    evidence_files = [path for path in (semantic_json, ocr_json, geometry_json, typography_json, *grabcut) if path is not None]
 
     def read_evidence(path):
         data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
@@ -158,7 +159,11 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, g
             mask = np.zeros((h, w), dtype=bool)
             mask[box_slice(item["bbox"], image.size)] = True
             masks.append(mask)
+    title_blocks = read_evidence(typography_json)["items"] if typography_json else []
+    grouped_ids = {ident for block in title_blocks for ident in block["source_ids"]}
     for item in ocr_items:
+        if item["id"] in grouped_ids:
+            continue
         region_mask = text_mask(item, (w, h))
         colors = text_colors(image, region_mask)
         color = "#222222" if colors is None else "#%02x%02x%02x" % tuple(np.rint(colors[0]).astype(int))
@@ -166,6 +171,12 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, g
                        "polygon": item["polygon"], "confidence": item["confidence"], "depth": "unknown",
                        "fill": color, "fill_evidence": "two-color estimate; verify visually"})
         masks.append(region_mask > 0)
+    for block in title_blocks:
+        layers.append({**block, "evidence": "OCR and pixel measurements", "depth": "unknown"})
+        mask = np.zeros((h, w), dtype=bool)
+        for line in block["lines"]:
+            mask[box_slice(line["bbox"], image.size)] = True
+        masks.append(mask)
     if len({layer["id"] for layer in layers}) != len(layers):
         raise ValueError("Evidence contains duplicate layer IDs")
     overlaps = []
@@ -212,12 +223,40 @@ def inpaint_rgba(pixels, removal):
     return result
 
 
-def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None):
+def title_attributes(line, block, font_file):
+    x, y, width, height = line["bbox"]
+    font_size = height * 1.37
+    attrs = {"x": str(x), "y": str(y + height), "font-family": block.get("font_family", "sans-serif"),
+             "font-weight": str(block.get("font_weight", 400)), "font-size": str(font_size),
+             "fill": line["fill"], "textLength": str(width), "lengthAdjust": "spacingAndGlyphs"}
+    if font_file and line["text"].strip():
+        font = ImageFont.truetype(str(font_file), 256)
+        mask, (offset_x, offset_y) = font.getmask2(line["text"], anchor="ls")
+        ink_bounds = mask.getbbox()
+        if ink_bounds:
+            left, top, right, bottom = ink_bounds
+            left, right = left + offset_x, right + offset_x
+            top, bottom = top + offset_y, bottom + offset_y
+            factor = height / (bottom - top)
+            scale = width / ((right - left) * factor)
+            family, style = font.getname()
+            style = style.lower()
+            weight = 900 if "black" in style or "heavy" in style else 700 if "bold" in style else 400
+            attrs.update({"x": f"{-left * factor:.5f}", "y": "0", "font-family": family,
+                          "font-weight": str(weight), "font-style": "italic" if "italic" in style or "oblique" in style else "normal",
+                          "font-size": f"{256*factor:.5f}", "textLength": f"{font.getlength(line['text']) * factor:.5f}",
+                          "transform": f"translate({x} {y-top*factor:.5f}) scale({scale:.7f} 1)"})
+    return attrs
+
+
+def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None, title_font=None):
     cv2, np = _deps()
     scene_path = Path(scene_path).resolve()
     scene = json.loads(scene_path.read_text(encoding="utf-8-sig"))
     output = Path(output)
     protect_inputs((output,), source, scene_path)
+    if title_font:
+        protect_inputs((output,), title_font)
     image = load(source)
     w, h = image.size
     if (scene["width"], scene["height"]) != (w, h) or scene["source_sha256"] != sha(source):
@@ -252,6 +291,17 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
                 removal[region] = 255
             continue
         if item["kind"] == "text" and clean_plate:
+            continue
+        if item["kind"] == "text-block":
+            if not clean_plate:
+                for line in item["lines"]:
+                    region = np.zeros_like(removal)
+                    region[box_slice(line["bbox"], (w, h))] = 255
+                    glyphs = glyph_mask(display, region)
+                    if not glyphs.any():
+                        warnings.append(f"{ident}: could not isolate title glyphs; source text may remain visible")
+                    front_graphics |= glyphs
+                    removal |= glyphs
             continue
         if item["kind"] == "text":
             glyphs = glyph_mask(display, text_mask(item, (w, h)))
@@ -320,6 +370,11 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
                 raise ValueError(f"Invalid rectangle geometry or opacity for {ident}")
             ET.SubElement(group, f"{{{ns}}}rect", {"x": str(x), "y": str(y), "width": str(width), "height": str(height),
                        "fill": item["fill"], "fill-opacity": str(opacity)})
+        elif item["kind"] == "text-block":
+            for index, line in enumerate(item["lines"], 1):
+                attrs = title_attributes(line, item, title_font)
+                attrs["id"] = f"{ident}-line-{index:03d}"
+                ET.SubElement(group, f"{{{ns}}}text", attrs).text = line["text"]
         elif item["kind"] == "text":
             # Color is a rough local estimate and font is a generic guess.
             polygon = item["polygon"]
