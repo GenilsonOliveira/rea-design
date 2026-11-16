@@ -11,6 +11,7 @@ dependencies = ["Pillow>=10"]
 
 [project.optional-dependencies]
 vision = ["numpy>=1.23,<3", "opencv-python>=4.8,<6", "rapidocr-onnxruntime>=1.4,<2", "onnxruntime>=1.16"]
+prompt = ["numpy>=1.23,<3", "torch>=2.6,<3", "transformers>=4.57,<5"]
 
 [project.scripts]
 rea-design = "rea_design.cli:main"

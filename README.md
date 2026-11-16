@@ -102,6 +102,23 @@ Veja o [experimento com anúncio histórico](examples/vintage-ad/DESIGN.md), inc
 
 O agente usa as evidências para criar `DESIGN.md`: composição, tipografia, mapa de camadas e oclusões, receita de reconstrução e incertezas. Esse documento é gerado pelo agente, não automaticamente pela CLI. Para reconstruir, é necessário também um editor ou ferramenta de renderização disponível ao agente. As imagens são processadas localmente pela CLI; o envio de imagens a um modelo depende do seu agente e provedor.
 
+### Recortar um elemento pela descrição
+
+Instale `.[vision,prompt]` no ambiente Python que vai executar a CLI. A inferência roda em CPU, com a imagem no seu computador. Baixe os pesos uma vez, na pasta do projeto. As revisões abaixo foram usadas no teste e baixam cerca de 1,1 GB em arquivos de modelo.
+
+```powershell
+python -m pip install ".[vision,prompt]"
+python -m rea_design.cli fetch-prompt-models --models-dir models
+```
+
+```powershell
+rea-design segment-text referencia.png --prompt "recorte só os óculos de sol" --models-dir models --out analise/oculos
+rea-design scene referencia.png --grounded analise/oculos/grounded.json --out analise/cena
+rea-design export-svg referencia.png --scene analise/cena/scene.json --out analise/editavel.svg
+```
+
+O Grounding DINO identifica a região candidata pelo texto. O Segment Anything recorta os pixels visíveis. Prefira o nome curto do objeto em inglês. Algumas expressões em português, como “óculos de sol”, têm aliases locais. O comando retorna uma correspondência por execução com overlay, máscara do tamanho do canvas e recorte transparente. `grounded.json` indica `no-match` se nenhum resultado passar pelo limiar. Confira a máscara antes de importá-la. `scene --grounded` pode ser combinado com `--ocr`, `--geometry` e as outras fontes da cena. O SVG mantém o recorte em um grupo raster que pode ser movido e redimensionado. Para um SVG apenas com o recorte, forneça uma imagem transparente do tamanho do canvas em `export-svg --background-plate`.
+
 ## Desenvolvimento
 
 ```bash

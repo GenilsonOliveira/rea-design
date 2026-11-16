@@ -84,16 +84,16 @@ def read_mask(mask_bytes, size):
 
 
 def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, typography_json=None,
-               grabcut=(), manual=(), replacements=()):
+               grounded_json=None, grabcut=(), manual=(), replacements=()):
     _, np = _deps()
     image = flatten(load(source))
     w, h = image.size
     source_hash = sha(source)
     output = Path(output).resolve()
     scene_file = output / "scene.json"
-    if not (semantic_json or ocr_json or geometry_json or typography_json or grabcut or manual):
-        raise ValueError("Provide at least one of --semantic, --ocr, --geometry, --typography, --grabcut and --mask")
-    evidence_files = [path for path in (semantic_json, ocr_json, geometry_json, typography_json, *grabcut) if path is not None]
+    if not (semantic_json or ocr_json or geometry_json or typography_json or grounded_json or grabcut or manual):
+        raise ValueError("Provide at least one scene input (--semantic, --ocr, --geometry, --typography, --grounded, --grabcut or --mask)")
+    evidence_files = [path for path in (semantic_json, ocr_json, geometry_json, typography_json, grounded_json, *grabcut) if path is not None]
 
     def read_evidence(path):
         data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
@@ -109,10 +109,16 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, t
         return mask
 
     candidates = []
+    grounded_hashes = {}
     if semantic_json:
         for item in read_evidence(semantic_json)["items"]:
             path = mask_from_evidence(semantic_json, item["mask"])
             candidates.append((item["id"], item["class"], path, "semantic mask"))
+    if grounded_json:
+        for item in read_evidence(grounded_json)["items"]:
+            path = mask_from_evidence(grounded_json, item["mask"])
+            grounded_hashes[item["id"]] = item["mask_sha256"]
+            candidates.append((item["id"], item["label"], path, "text-prompt mask"))
     for index, path in enumerate(grabcut, 1):
         subject = read_evidence(path).get("subject")
         if not subject:
@@ -133,7 +139,11 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, t
         if ident in replacement_map:
             mask_path = Path(replacement_map[ident])
             evidence = f"manual correction of {evidence}"
-        mask = read_mask(mask_path.read_bytes(), image.size)
+        original = mask_path.read_bytes()
+        if ident in grounded_hashes and ident not in replacement_map:
+            if hashlib.sha256(original).hexdigest() != grounded_hashes[ident]:
+                raise ValueError(f"Mask integrity check failed for {ident}: {mask_path}")
+        mask = read_mask(original, image.size)
         bounds = mask.getbbox()
         if bounds is None:
             raise ValueError(f"Mask is empty for {ident}: {mask_path}")
@@ -359,6 +369,8 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             group.set("data-role", item["role"])
         if item["kind"] == "object":
             if ident in objects:
+                if "label" in item:
+                    ET.SubElement(group, f"{{{ns}}}title").text = item["label"]
                 bounds, cutout = objects[ident]
                 left, top, right, bottom = bounds
                 ET.SubElement(group, f"{{{ns}}}image", {"x": str(left), "y": str(top), "width": str(right-left),
