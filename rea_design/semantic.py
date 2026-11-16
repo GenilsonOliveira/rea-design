@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from PIL import Image, ImageDraw
-from .cli import load, flatten
+from .cli import load, flatten, protect_inputs
 from .vision import _deps
 
 CLASSES = ("background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor")
@@ -18,6 +18,10 @@ def semantic(source, output, model, min_area=0.002):
         raise ValueError("ONNX Runtime missing; install rea-design[vision]") from exc
     if not 0 <= min_area <= 1:
         raise ValueError("min-area must be 0–1")
+    output = Path(output)
+    protect_inputs((output / "semantic.json", output / "semantic-overlay.png"), source, model)
+    if not Path(model).is_file():
+        raise ValueError(f"ONNX model not found: {model}")
     image = flatten(load(source))
     w, h = image.size
     # Keep aspect ratio; cap large inputs for bounded memory use.
@@ -33,7 +37,6 @@ def semantic(source, output, model, min_area=0.002):
         raise ValueError(f"Expected FCN 21-class NCHW logits; got {logits.shape}; use the documented model")
     labels = np.argmax(logits[0], axis=0).astype(np.uint8)
     labels = cv2.resize(labels, (w, h), interpolation=cv2.INTER_NEAREST)
-    output = Path(output)
     (output / "masks").mkdir(parents=True, exist_ok=True)
     overlay = image.copy()
     draw = ImageDraw.Draw(overlay)
@@ -46,6 +49,7 @@ def semantic(source, output, model, min_area=0.002):
                 continue
             ident = f"object-{len(items)+1:03d}"
             mask_path = f"masks/{ident}.png"
+            protect_inputs((output / mask_path,), source, model)
             Image.fromarray(((components == component) * 255).astype(np.uint8)).save(output / mask_path)
             items.append({"id": ident, "class": CLASSES[class_id], "bbox": [x, y, rw, rh], "area_pixels": area, "mask": mask_path})
             draw.rectangle((x, y, x+rw-1, y+rh-1), outline="#ff00b7", width=2)

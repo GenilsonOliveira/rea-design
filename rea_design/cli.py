@@ -7,6 +7,8 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
+from . import __version__
+
 
 def load(path):
     with Image.open(path) as image:
@@ -20,8 +22,21 @@ def flatten(image):
     return Image.alpha_composite(background, image).convert("RGB")
 
 
+def protect_inputs(outputs, *inputs):
+    for output in outputs:
+        output = Path(output)
+        for source in map(Path, inputs):
+            if output.resolve() == source.resolve() or (
+                output.exists() and source.exists() and output.samefile(source)
+            ):
+                raise ValueError(f"Output would overwrite an input: {output}")
+
+
 def inspect(source, output):
     source, output = Path(source), Path(output)
+    paths = [output / name for name in ("evidence.json", "normalized.png", "edges.png", "grid.png")]
+    paths.extend(output / "crops" / f"r{row}-c{col}.png" for row in (1, 2) for col in (1, 2))
+    protect_inputs(paths, source)
     image = load(source)
     w, h = image.size
     if w < 3 or h < 3:
@@ -63,16 +78,22 @@ def inspect(source, output):
 
 
 def compare(reference, candidate, output):
-    ref, cand = flatten(load(reference)), flatten(load(candidate))
+    ref, cand = load(reference), load(candidate)
     if ref.size != cand.size:
         raise ValueError(f"Dimensions differ: {ref.size} vs {cand.size}; align the canvas before comparing")
     output = Path(output)
+    protect_inputs((output / name for name in ("difference.png", "overlay.png", "comparison.json", "alpha-difference.png")), reference, candidate)
     output.mkdir(parents=True, exist_ok=True)
+    alpha_difference = ImageChops.difference(ref.getchannel("A"), cand.getchannel("A"))
+    alpha_difference.save(output / "alpha-difference.png")
+    alpha_mae = ImageStat.Stat(alpha_difference).mean[0]
+    ref, cand = flatten(ref), flatten(cand)
     difference = ImageChops.difference(ref, cand)
     difference.save(output / "difference.png")
     Image.blend(ref, cand, 0.5).save(output / "overlay.png")
     mae = sum(ImageStat.Stat(difference).mean) / 3
     result = {"width": ref.width, "height": ref.height, "mean_absolute_rgb_error": round(mae, 4),
+              "mean_absolute_alpha_error": round(alpha_mae, 4),
               "note": "Pixel error (0–255) is alignment-sensitive and is not a perceptual quality score."}
     (output / "comparison.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result
@@ -80,6 +101,7 @@ def compare(reference, candidate, output):
 
 def main():
     parser = argparse.ArgumentParser(prog="rea-design", description="Generate evidence for an agent-led design breakdown.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("inspect", help="Extract measurements, grid, edges and context crops")
     p.add_argument("image")

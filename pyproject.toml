@@ -4,16 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rea-design"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Evidence-assisted visual design reverse engineering for agents"
 requires-python = ">=3.10"
 dependencies = ["Pillow>=10"]
 
 [project.optional-dependencies]
-vision = ["numpy>=1.23,<3", "opencv-python>=4.8,<5", "rapidocr-onnxruntime>=1.4,<2", "onnxruntime>=1.16"]
+vision = ["numpy>=1.23,<3", "opencv-python>=4.8,<6", "rapidocr-onnxruntime>=1.4,<2", "onnxruntime>=1.16"]
 
 [project.scripts]
 rea-design = "rea_design.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["rea_design*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "rea_design.__version__"}

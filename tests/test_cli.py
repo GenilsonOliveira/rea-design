@@ -7,6 +7,22 @@ from rea_design.cli import inspect, compare
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_inspect_protects_original_and_compare_measures_alpha(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "normalized.png"
+            Image.new("RGBA", (10, 10), (0, 0, 0, 0)).save(source)
+            original = source.read_bytes()
+            with self.assertRaisesRegex(ValueError, "overwrite an input"):
+                inspect(source, root)
+            self.assertEqual(source.read_bytes(), original)
+            self.assertFalse((root / "evidence.json").exists())
+            candidate = root / "opaque.png"
+            Image.new("RGB", (10, 10), "white").save(candidate)
+            result = compare(source, candidate, root / "compare")
+            self.assertEqual(result["mean_absolute_rgb_error"], 0)
+            self.assertEqual(result["mean_absolute_alpha_error"], 255)
+
     def test_inspect_preserves_dimensions_and_builds_context(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

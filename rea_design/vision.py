@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 from PIL import Image, ImageDraw
-from .cli import load, flatten
+from .cli import load, flatten, protect_inputs
 
 
 def _deps():
@@ -24,6 +24,7 @@ def ocr(source, output):
         raise ValueError("OCR dependencies missing; install rea-design[vision]") from exc
     image = flatten(load(source))
     output = Path(output)
+    protect_inputs((output / "ocr.json", output / "ocr-overlay.png"), source)
     output.mkdir(parents=True, exist_ok=True)
     # Pass an array rather than a path so EXIF orientation and Unicode paths work.
     bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -52,6 +53,10 @@ def segment(source, output, rect=None, colors=8, min_area=0.001):
     image = flatten(load(source))
     w, h = image.size
     output = Path(output)
+    names = ["segments.json", "segments-overlay.png"]
+    if rect is not None:
+        names.extend(("subject.png", "subject-mask.png"))
+    protect_inputs((output / name for name in names), source)
     output.mkdir(parents=True, exist_ok=True)
     masks = output / "masks"
     masks.mkdir(exist_ok=True)
@@ -71,7 +76,9 @@ def segment(source, output, rect=None, colors=8, min_area=0.001):
             if area < max(1, w*h*min_area):
                 continue
             rid = f"region-{len(regions)+1:03d}"
-            Image.fromarray(((labels == component) * 255).astype("uint8")).save(masks / f"{rid}.png")
+            target = masks / f"{rid}.png"
+            protect_inputs((target,), source)
+            Image.fromarray(((labels == component) * 255).astype("uint8")).save(target)
             color = "#%02x%02x%02x" % tuple(palette[index*3:index*3+3])
             regions.append({"id": rid, "bbox": [x, y, rw, rh], "area_pixels": area, "color": color, "mask": f"masks/{rid}.png"})
             draw.rectangle((x, y, x+rw-1, y+rh-1), outline="#ff00b7", width=2)
