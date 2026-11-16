@@ -122,13 +122,17 @@ O Grounding DINO identifica a região candidata pelo texto. O Segment Anything r
 ### Montar um SVG com vários recortes
 
 ```powershell
-rea-design assemble referencia.png --prompt "óculos de sol" --prompt "pessoa" --models-dir models --clean-plate retrato.png --repair-plate retrato-sem-oculos.png --title-font caminho.ttf --out analise
-rea-design export-svg referencia.png --scene analise/scene/scene.json --clean-plate retrato.png --repair-plate retrato-sem-oculos.png --title-font caminho.ttf --move grounded-001 32 -120 --title-line NOVA --title-line FORMA --out analise/editado.svg
+rea-design assemble referencia.png --prompt "óculos de sol" --prompt "pessoa" --models-dir models --clean-plate retrato-com-oculos.png --repair-model models/lama/lama_fp32.onnx --title-font caminho.ttf --out analise
+rea-design export-svg referencia.png --scene analise/scene/scene.json --clean-plate retrato-com-oculos.png --repair-model models/lama/lama_fp32.onnx --title-font caminho.ttf --move grounded-001 32 -120 --title-line NOVA --title-line FORMA --out analise/editado.svg
 ```
 
 `assemble` mede a referência, procura um recorte por descrição em uma execução e monta `reconstruction.svg`. O `scene.json` registra cada interseção. Quando uma máscara menor está quase toda contida em uma maior, a CLI sugere a menor na frente. Interseções ambíguas mantêm profundidade desconhecida. O SVG agrupa as linhas da grade e o texto pequeno à direita do título, quando detectado. O arquivo de cena permite revisar a proposta e ajustar `render_order`.
 
-A foto de `--clean-plate` serve de fonte dos pixels dos recortes e deve estar alinhada à referência. `--repair-plate` é opcional. Use uma foto alinhada que mostre a área antes ocultada pelo objeto frontal. Os pixels são usados na sobreposição proposta e mesclados nas bordas, dentro do recorte traseiro. Sem a foto de reparo, o preenchimento é estimado e a CLI emite um aviso. A inferência é local e retorna `partial` se somente parte das descrições tiver correspondência. `segment-text` também aceita `--prompt` repetido de forma independente.
+A foto opcional de `--clean-plate` fornece os pixels dos recortes e deve estar alinhada à referência. Ela mantém os objetos visíveis e pode vir sem a tipografia e a grade. Por padrão, a própria referência fornece os pixels. A segmentação retorna `partial` quando somente algumas descrições têm correspondência.
+
+Para `--repair-model`, instale o extra `vision` e salve o [checkpoint LaMa de 512 × 512](https://huggingface.co/Carve/LaMa-ONNX/blob/main/lama_fp32.onnx) como `models/lama/lama_fp32.onnx`. O modelo roda em CPU e preenche as interseções entre objetos cuja ordem é sugerida ou confirmada e respeitada no `render_order`. A exportação registra as camadas preenchidas, o número de pixels ocultos e o hash do modelo. Revise a área revelada, especialmente se o objeto oculta olhos, letras ou detalhes finos.
+
+Quando houver uma foto alinhada que mostre a área oculta, use `--repair-plate` no lugar de `--repair-model`. Sem essas opções, a CLI usa preenchimento clássico e sinaliza a estimativa. Para controlar o fundo do canvas, use a opção independente `--background-plate`.
 
 ## Desenvolvimento
 

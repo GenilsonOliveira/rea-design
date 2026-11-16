@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 from PIL import Image, ImageDraw
@@ -20,6 +21,50 @@ def embedded_image(node):
 
 @unittest.skipUnless(importlib.util.find_spec("cv2") and importlib.util.find_spec("numpy"), "install rea-design[vision]")
 class SceneTests(unittest.TestCase):
+    def test_automatic_repair_uses_only_the_overlap_behind_moved_object(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            image = Image.new("RGBA", (50, 50), "blue")
+            ImageDraw.Draw(image).rectangle((18, 22, 22, 28), fill="red")
+            source = root / "source.png"
+            image.save(source)
+            for name, box in (("portrait", (5, 5, 40, 40)), ("glasses", (18, 22, 22, 28))):
+                mask = Image.new("L", image.size)
+                ImageDraw.Draw(mask).rectangle(box, fill=255)
+                mask.save(root / f"{name}.png")
+            out = root / "scene"
+            make_scene(source, None, None, out,
+                       manual=[("portrait", root / "portrait.png"), ("glasses", root / "glasses.png")])
+            model = root / "lama.onnx"
+            model.write_bytes(b"test fixture")
+
+            def generate(pixels, hidden):
+                np.testing.assert_array_equal(hidden > 0, np.asarray(image)[:, :, 0] > 0)
+                repaired = pixels.copy()
+                repaired[hidden > 0, :3] = [0, 128, 0]
+                return repaired, hidden
+
+            scene_path = out / "scene.json"
+            with patch("rea_design.scene.LamaRepair") as lama:
+                lama.return_value.repair.side_effect = generate
+                svg_path = root / "edit.svg"
+                result = export_svg(source, scene_path, svg_path, repair_model=model,
+                                    moves=[("manual-002", 0, -10)])
+                lama.assert_called_once_with(model)
+                lama.return_value.repair.assert_called_once()
+            self.assertEqual(result["repaired_overlaps"], [{"layer": "manual-001", "pixels": 35}])
+            self.assertEqual(result["automatic_repair"]["method"], "lama-onnx")
+            self.assertIsNone(result["repair_plate_sha256"])
+            svg = ET.parse(svg_path)
+            portrait = svg.find(".//s:g[@id='manual-001']/s:image", SVG)
+            glasses = svg.find(".//s:g[@id='manual-002']", SVG)
+            self.assertEqual(embedded_image(portrait).getpixel((15, 20)), (0, 128, 0, 255))
+            self.assertEqual(embedded_image(portrait).getpixel((0, 0)), (0, 0, 255, 255))
+            self.assertEqual(embedded_image(glasses.find("s:image", SVG)).getpixel((2, 3)), (255, 0, 0, 255))
+            self.assertEqual(glasses.get("transform"), "translate(0 -10)")
+
     def test_grabcut_correction_and_manual_mask_with_clean_plate(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

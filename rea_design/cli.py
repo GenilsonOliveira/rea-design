@@ -157,7 +157,9 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--clean-plate", help="Use an aligned photograph without the graphics as the pixel source")
     p.add_argument("--background-plate", help="Use an aligned subject-free background instead of inpainting")
-    p.add_argument("--repair-plate", help="Aligned donor image for the pixels under foreground objects")
+    repair = p.add_mutually_exclusive_group()
+    repair.add_argument("--repair-plate", help="Aligned donor image for the pixels under foreground objects")
+    repair.add_argument("--repair-model", metavar="LAMA_ONNX", help="Recompose inferred overlaps using local LaMa")
     p.add_argument("--move", nargs=3, metavar=("LAYER_ID", "DX", "DY"), action="append", default=[])
     p.add_argument("--title-line", action="append", help="Replace successive lines of the single editable title")
     p.add_argument("--title-font", metavar="FONT_FILE", help="Measure the title using a local TTF or OTF")
@@ -167,7 +169,9 @@ def main():
     p.add_argument("--models-dir", default="models")
     p.add_argument("--threshold", type=float, default=0.25)
     p.add_argument("--clean-plate")
-    p.add_argument("--repair-plate")
+    repair = p.add_mutually_exclusive_group()
+    repair.add_argument("--repair-plate")
+    repair.add_argument("--repair-model", metavar="LAMA_ONNX", help="Recompose inferred overlaps using local LaMa")
     p.add_argument("--background-plate")
     p.add_argument("--title-font")
     p.add_argument("--out", required=True)
@@ -203,13 +207,14 @@ def main():
         elif args.command == "assemble":
             from .assemble import assemble
             result = assemble(args.image, args.prompt, args.out, models_dir=args.models_dir, threshold=args.threshold,
-                              clean_plate=args.clean_plate, repair_plate=args.repair_plate,
+                              clean_plate=args.clean_plate, repair_plate=args.repair_plate, repair_model=args.repair_model,
                               background_plate=args.background_plate, title_font=args.title_font)
         else:
             from .scene import export_svg
             result = export_svg(args.image, args.scene, args.out, clean_plate=args.clean_plate,
                                 background_plate=args.background_plate, title_font=args.title_font,
-                                repair_plate=args.repair_plate, moves=args.move, title_lines=args.title_line)
+                                repair_plate=args.repair_plate, repair_model=args.repair_model,
+                                moves=args.move, title_lines=args.title_line)
         # JSON remains lossless even when Windows redirects stdout to a legacy code page.
         print(json.dumps(result, indent=2, ensure_ascii=True))
     except (OSError, ValueError, UnidentifiedImageError) as exc:

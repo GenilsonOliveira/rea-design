@@ -11,6 +11,7 @@ from xml.etree import ElementTree as ET
 from PIL import Image, ImageFont
 from .cli import flatten, load, protect_inputs
 from .layering import propose_groups, suggest_overlap, suggested_paint_order
+from .repair import LamaRepair, validate_repair_options
 from .vision import _deps
 
 
@@ -284,14 +285,17 @@ def title_attributes(line, block, font_file):
 
 
 def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None, title_font=None,
-               repair_plate=None, moves=(), title_lines=None):
+               repair_plate=None, repair_model=None, moves=(), title_lines=None):
     cv2, np = _deps()
+    validate_repair_options(repair_plate, repair_model)
     scene_path = Path(scene_path).resolve()
     scene = json.loads(scene_path.read_text(encoding="utf-8-sig"))
     output = Path(output)
     protect_inputs((output,), source, scene_path)
     if title_font:
         protect_inputs((output,), title_font)
+    if repair_model:
+        protect_inputs((output,), repair_model)
     image = load(source)
     w, h = image.size
     if (scene["width"], scene["height"]) != (w, h) or scene["source_sha256"] != sha(source):
@@ -345,6 +349,7 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
     objects = {}
     seen_masks = {}
     repaired_overlaps = []
+    automatic = None
     removal = np.zeros((h, w), np.uint8)
     front_graphics = np.zeros_like(removal)
     for ident in reversed(order):
@@ -401,13 +406,24 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
         occluded = coverage[box] & front_graphics[box]
         source_pixels = pixels[box]
         if hidden.any():
-            if repair is not None:
-                radius = max(3, min(16, round(min(w, h) * .018)))
-                source_pixels = blend_overlap(source_pixels, repair[box], hidden, radius)
+            donor_pixels = repair[box] if repair is not None else None
+            radius = max(3, min(16, round(min(w, h) * .018)))
+            if repair_model:
+                if automatic is None:
+                    automatic = LamaRepair(repair_model)
+                overlap_mask = np.zeros_like(removal)
+                overlap_mask[box] = hidden
+                generated, repair_mask = automatic.repair(pixels, overlap_mask)
+                donor_pixels = generated[box]
+                # Clear residual edge pixels where the foreground crosses the portrait outline.
+                removal |= repair_mask
+                radius = 4
+            if donor_pixels is not None:
+                source_pixels = blend_overlap(source_pixels, donor_pixels, hidden, radius)
                 repaired_overlaps.append({"layer": ident, "pixels": int(np.count_nonzero(hidden))})
             else:
                 occluded |= hidden
-                warnings.append(f"{ident}: filled hidden overlap approximately; use --repair-plate for an aligned donor")
+                warnings.append(f"{ident}: used classical inpainting; try --repair-model or an aligned --repair-plate")
         donors = (coverage[box] > 0) & (occluded == 0)
         if occluded.any() and donors.any():
             cutout = inpaint_rgba(source_pixels, occluded | (255 - coverage[box]))
@@ -417,6 +433,8 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
                 warnings.append(f"{ident}: insufficient object pixels to remove overlapping graphics")
         cutout[:, :, 3] = np.minimum(pixels[box][:, :, 3], mask[box])
         objects[ident] = (bounds, Image.fromarray(cutout))
+    if repair_model and automatic is None:
+        warnings.append("No ordered object overlaps to recompose with LaMa")
     # This is an approximate background; source pixels behind opaque objects are unavailable.
     if background_plate:
         background = supplied_background
@@ -485,5 +503,6 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
     return {"svg": str(output), "layers": len(layers), "warnings": warnings,
             "pixel_source_sha256": pixel_hash, "repaired_overlaps": repaired_overlaps,
             "repair_plate_sha256": sha(repair_plate) if repair_plate else None,
+            "automatic_repair": {"method": "lama-onnx", "model_sha256": sha(repair_model)} if automatic else None,
             "background_plate_sha256": sha(background_plate) if background_plate else None,
             "note": "Editable text and raster cutouts over a raster background; font, depth and hidden pixels are estimates."}

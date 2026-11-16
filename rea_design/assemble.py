@@ -5,15 +5,17 @@ from pathlib import Path
 from .cli import load, protect_inputs
 from .geometry import detect_geometry
 from .grounded import segment_texts
+from .repair import validate_repair_options
 from .scene import export_svg, make_scene
 from .typography import detect_typography
 from .vision import ocr
 
 
 def assemble(source, prompts, output, *, models_dir="models", threshold=.25, clean_plate=None,
-             repair_plate=None, background_plate=None, title_font=None):
+             repair_plate=None, repair_model=None, background_plate=None, title_font=None):
     if not 1 <= len(prompts) <= 12 or not 0 < threshold <= 1:
         raise ValueError("Provide 1 to 12 descriptions and a threshold greater than zero and at most 1")
+    validate_repair_options(repair_plate, repair_model)
     output = Path(output)
     reference_size = load(source).size
     plates = (clean_plate, repair_plate, background_plate)
@@ -25,7 +27,8 @@ def assemble(source, prompts, output, *, models_dir="models", threshold=.25, cle
                "typography/typography-overlay.png", "grounded/grounded.json", "grounded/grounded-overlay.png"]
     outputs.extend(("grounded/mask.png", "grounded/cutout.png") if len(prompts) == 1 else
                    (f"grounded/{kind}-{index:03d}.png" for kind in ("mask", "cutout") for index in range(1, len(prompts)+1)))
-    protect_inputs((output / path for path in outputs), source, *(path for path in (*plates, title_font) if path))
+    protect_inputs((output / path for path in outputs), source,
+                   *(path for path in (*plates, title_font, repair_model) if path))
     photo = clean_plate or source
     ocr_path = output / "ocr/ocr.json"
     ocr(source, ocr_path.parent)
@@ -39,7 +42,8 @@ def assemble(source, prompts, output, *, models_dir="models", threshold=.25, cle
     scene = make_scene(source, None, ocr_path, scene_path.parent, geometry_json=geometry_path,
                        typography_json=typography_path, grounded_json=grounded_path, grounded_source=clean_plate)
     rendered = export_svg(source, scene_path, output / "reconstruction.svg", clean_plate=clean_plate,
-                          repair_plate=repair_plate, background_plate=background_plate, title_font=title_font)
+                          repair_plate=repair_plate, repair_model=repair_model,
+                          background_plate=background_plate, title_font=title_font)
     return {**rendered, "status": grounded["status"], "requests": grounded["requests"], "scene": str(scene_path),
             "render_order": scene["render_order"],
             "order_proposals": [item for item in scene["overlaps"] if item["ordering"] == "suggested"]}
