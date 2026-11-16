@@ -23,6 +23,59 @@ def embedded_image(node):
 
 @unittest.skipUnless(importlib.util.find_spec("cv2") and importlib.util.find_spec("numpy"), "install rea-design[vision]")
 class SceneTests(unittest.TestCase):
+    def test_local_edit_places_one_title_line_between_two_foreground_objects(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.png"
+            original = Image.new("RGB", (144, 166), (222, 220, 213))
+            draw = ImageDraw.Draw(original)
+            draw.rectangle((64, 40, 130, 149), fill=(32, 34, 38))
+            draw.rectangle((22, 62, 63, 87), fill=(193, 33, 23))
+            # Old red lettering makes a notch along the left side of the visible person mask.
+            draw.rectangle((32, 95, 78, 107), fill=(184, 62, 48))
+            draw.rectangle((42, 104, 82, 147), fill=(64, 68, 73))
+            original.save(source)
+            person_mask = Image.new("L", original.size)
+            draw_person = ImageDraw.Draw(person_mask)
+            draw_person.rectangle((64, 40, 130, 149), fill=255)
+            draw_person.rectangle((64, 95, 78, 107), fill=0)
+            dog_mask = Image.new("L", original.size)
+            ImageDraw.Draw(dog_mask).rectangle((42, 104, 82, 147), fill=255)
+            person_mask.save(root / "person.png")
+            dog_mask.save(root / "dog.png")
+            title = {"id": "title-001", "kind": "text-block", "bbox": [20, 60, 63, 50], "source_ids": [],
+                     "lines": [{"text": "FIRST", "bbox": [20, 60, 44, 29], "fill": "#c12117", "ink_fraction": .8},
+                               {"text": "SECOND", "bbox": [28, 88, 54, 40], "fill": "#c12117", "ink_fraction": .4}]}
+            path = root / "typography.json"
+            path.write_text(json.dumps({"width": original.width, "height": original.height, "items": [title],
+                                       "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}),
+                            encoding="utf-8")
+            folder = root / "scene"
+            make_scene(source, None, None, folder, typography_json=path,
+                       manual=[("person", root / "person.png"), ("dog", root / "dog.png")])
+            target = root / "local.svg"
+            options = {"title_only": True, "title_lines": ["ABOVE", "BELOW"],
+                       "title_behind": ["manual-001", "manual-002"], "title_paper": True}
+            result = export_svg(source, folder / "scene.json", target,
+                                title_line_over=[("2", "manual-001")], **options)
+            self.assertEqual(result["render_order"],
+                             ["background-title-cleaned", "title-001", "manual-001",
+                              "title-001-after-manual-001", "manual-002"])
+            self.assertGreater(result["photo_title_repair_pixels"], 0)
+            svg = ET.parse(target)
+            self.assertEqual(svg.find(".//s:text[@id='title-001-line-002']", SVG).text, "BELOW")
+            img = svg.find("s:g[@id='manual-001']/s:image", SVG)
+            person = embedded_image(img)
+            px, py = int(img.get("x")), int(img.get("y"))
+            pixel = np.array(person.getpixel((72 - px, 99 - py)), dtype=np.int16)
+            self.assertEqual(pixel[3], 255)
+            self.assertLess(np.abs(pixel[:3] - [32, 34, 38]).mean(), 12)
+            with self.assertRaisesRegex(ValueError, "paint order"):
+                export_svg(source, folder / "scene.json", target,
+                           title_line_over=[("2", "manual-002")], **options)
+
     def test_lifted_ink_recovers_strokes_outside_the_ocr_seed_and_moves_on_its_own(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

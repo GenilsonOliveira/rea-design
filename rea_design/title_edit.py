@@ -6,12 +6,13 @@ from PIL import Image, ImageColor
 
 from .ink_overlay import lift_title_ink
 from .paper_repair import restore_paper
+from .title_depth import recover_photo_ink, title_runs
 from .vision import _deps
 
 
-def title_ink(image, line, *, margin=2):
+def title_ink(image, line, *, margin=2, chromatic=False):
     """Return the title region and pixels close to its measured ink color."""
-    _, np = _deps()
+    cv2, np = _deps()
     from .scene import box_slice
 
     width, height = image.size
@@ -21,9 +22,17 @@ def title_ink(image, line, *, margin=2):
     region[box] = 255
     ink = np.zeros_like(region)
     if line.get("ink_fraction") is not None:
-        color = np.asarray(ImageColor.getrgb(line["fill"]), dtype=np.float32)
-        pixels = np.asarray(image)[box].astype(np.float32)
-        ink[box] = (np.square(pixels - color).sum(axis=2) <= 24**2).astype(np.uint8) * 255
+        color = np.asarray(ImageColor.getrgb(line["fill"]), dtype=np.uint8)
+        pixels = np.asarray(image)[box]
+        if chromatic and np.ptp(color) >= 48:
+            hue, saturation, _ = cv2.cvtColor(color.reshape(1, 1, 3), cv2.COLOR_RGB2HSV)[0, 0]
+            hsv = cv2.cvtColor(pixels, cv2.COLOR_RGB2HSV)
+            difference = np.abs(hsv[:, :, 0].astype(np.int16) - int(hue))
+            selected = ((np.minimum(difference, 180 - difference) <= 17)
+                        & (hsv[:, :, 1] >= max(28, .18 * saturation)) & (np.ptp(pixels, axis=2) >= 16))
+        else:
+            selected = np.square(pixels.astype(np.float32) - color).sum(axis=2) <= 24**2
+        ink[box] = selected.astype(np.uint8) * 255
     return region, ink
 
 
@@ -62,13 +71,16 @@ def infer_title_foregrounds(image, title, coverages):
     return result
 
 
-def fit_visible_height(line, ink, protected):
+def fit_visible_bounds(line, ink, protected, *, stay_inside=False):
     """Tighten a measured line if its old box extends into visible non-ink."""
     _, np = _deps()
     x, y, width, height = line["bbox"]
     if "layout_bbox" in line:
         return
-    rows = np.flatnonzero(np.count_nonzero(ink & ~protected, axis=1) >= max(3, width * .075))
+    visible = ink & ~protected
+    rows = np.flatnonzero(np.count_nonzero(visible, axis=1) >= max(3, width * .075))
+    if stay_inside:
+        rows = rows[(rows >= y) & (rows < y + height)]
     if not len(rows) or rows[-1] + 1 - rows[0] < .65 * height:
         return
     # Keep the estimated height where almost all of the missing edge is occluded.
@@ -78,10 +90,20 @@ def fit_visible_height(line, ink, protected):
         top = y
     if bottom < y + height and protected[bottom:y + height, columns].mean() > .55:
         bottom = y + height
-    line["layout_bbox"] = [x, top, width, bottom - top]
+    left, right = x, x + width
+    if stay_inside:
+        cols = np.flatnonzero(np.count_nonzero(visible[top:bottom], axis=0) >= max(3, height * .075))
+        cols = cols[(cols >= left) & (cols < right)]
+        if len(cols) and cols[-1] + 1 - cols[0] >= .75 * width:
+            lo, hi = int(cols[0]), int(cols[-1]) + 1
+            if lo > left and protected[top:bottom, max(0, left):lo].mean() <= .55:
+                left = lo
+            if hi < right and protected[top:bottom, hi:right].mean() <= .55:
+                right = hi
+    line["layout_bbox"] = [left, top, right - left, bottom - top]
 
 
-def title_cleanup_mask(image, title, protection, warnings, *, fit_layout=False):
+def title_cleanup_mask(image, title, protection, warnings, *, fit_layout=False, chromatic=False):
     """Mask visible ink and antialiasing, leaving the foreground cutouts intact."""
     cv2, np = _deps()
     from .scene import glyph_mask
@@ -90,7 +112,7 @@ def title_cleanup_mask(image, title, protection, warnings, *, fit_layout=False):
     kernel = np.ones((5, 5), np.uint8)
     for index, line in enumerate(title["lines"], 1):
         margin = max(4, min(12, round(line["bbox"][3] * .055)))
-        region, ink = title_ink(image, line, margin=margin)
+        region, ink = title_ink(image, line, margin=margin, chromatic=chromatic)
         visible = (region > 0) & (protection == 0)
         area = int(np.count_nonzero(visible))
         if not area:
@@ -99,7 +121,7 @@ def title_cleanup_mask(image, title, protection, warnings, *, fit_layout=False):
         if max(3, area * .09) <= selected <= area * .86:
             glyphs = cv2.dilate(ink, kernel) & region
             if fit_layout:
-                fit_visible_height(line, ink > 0, protection > 0)
+                fit_visible_bounds(line, ink > 0, protection > 0, stay_inside=chromatic)
         else:
             original, _ = title_ink(image, line, margin=0)
             glyphs = glyph_mask(image, original & (255 - protection))
@@ -111,7 +133,7 @@ def title_cleanup_mask(image, title, protection, warnings, *, fit_layout=False):
 
 
 def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title_font, title_behind,
-                      title_overlays, moves_by_id):
+                      title_overlays, moves_by_id, *, title_line_over=(), title_paper=False):
     from .cli import flatten
     from .scene import append_title_lines, data_uri, inpaint_rgba, read_object_layer, scene_layers, svg_document
 
@@ -158,18 +180,19 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
                     evidence[ident] = {"ordering": "inherited", "above": overlap["behind"]}
                     break
 
+    ids = [ident for ident in order if ident in evidence and coverages[ident].any()]
+    runs = title_runs(title["lines"], ids, title_line_over)
+    corrected, photo_pixels = recover_photo_ink(pixels, display, title, ids, coverages, runs) if title_line_over else ({}, 0)
     # Partition shared pixels into the topmost cutout so the original is painted exactly once.
     protection = np.zeros(pixels.shape[:2], np.uint8)
     foreground = []
-    for ident in reversed(order):
-        if ident not in evidence:
-            continue
+    for ident in reversed(ids):
         coverage = coverages[ident] & (255 - protection)
         bounds = Image.fromarray(coverage).getbbox()
-        if bounds is not None:
-            foreground.append((ident, coverage, bounds))
+        foreground.append((ident, coverage, bounds))
         protection |= coverages[ident]
-    removal = title_cleanup_mask(display, title, protection, warnings, fit_layout=True)
+    removal = title_cleanup_mask(display, title, protection, warnings, fit_layout=True,
+                                 chromatic=title_paper or bool(title_line_over))
     if not removal.any():
         raise ValueError("Could not isolate visible title ink. Review the title boxes and colors in the scene.")
     overlay_removal = np.zeros_like(removal)
@@ -185,7 +208,9 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
     # Exclude the portrait from the donors, then copy back only the title cleanup.
     excluded = edit_mask | protection
     filled = inpaint_rgba(pixels, excluded)
-    paper_pixels = restore_paper(pixels, filled, overlay_removal, excluded)
+    paper_pixels = restore_paper(pixels, filled, edit_mask, excluded, wide=True) if title_paper else (
+        restore_paper(pixels, filled, overlay_removal, excluded)
+    )
     base = pixels.copy()
     base[edit_mask > 0] = filled[edit_mask > 0]
     base[protection > 0] = 0
@@ -194,35 +219,53 @@ def export_title_edit(image, pixel_hash, scene, scene_path, output, title, title
     width, height = image.size
     ET.SubElement(svg, f"{namespace}image", {"id": "background-title-cleaned", "width": str(width),
                                             "height": str(height), "href": data_uri(Image.fromarray(base))})
-    group = ET.SubElement(svg, f"{namespace}g", {"id": title["id"], "data-kind": "text-block"})
-    append_title_lines(group, namespace, title, title_font)
     overlay_report = []
-    for ident, label, left, top, asset in lifted:
-        layer = ET.SubElement(svg, f"{namespace}g", {"id": ident, "data-role": "title-overlay",
-                                                   "data-kind": "ink-cutout"})
-        if ident in moves_by_id:
-            layer.set("transform", moves_by_id[ident])
-        ET.SubElement(layer, f"{namespace}title").text = label
-        ET.SubElement(layer, f"{namespace}image", {"x": str(left), "y": str(top), "width": str(asset.width),
-                                                  "height": str(asset.height), "href": data_uri(asset)})
-        overlay_report.append({"layer": ident, "label": label, "bbox": [left, top, asset.width, asset.height]})
-    for ident, coverage, bounds in reversed(foreground):
+    slots = [index for index, lines in enumerate(runs) if lines]
+
+    def append_slot(slot):
+        if not runs[slot]:
+            return
+        ident = title["id"] if slot == slots[0] else f"{title['id']}-after-{ids[slot - 1]}"
+        attributes = {"id": ident, "data-kind": "text-block"}
+        if title_line_over:
+            attributes["data-title"] = title["id"]
+        group = ET.SubElement(svg, f"{namespace}g", attributes)
+        append_title_lines(group, namespace, title, title_font, indices=runs[slot])
+        if slot != slots[-1]:
+            return
+        for ident, label, left, top, asset in lifted:
+            layer = ET.SubElement(svg, f"{namespace}g", {"id": ident, "data-role": "title-overlay",
+                                                       "data-kind": "ink-cutout"})
+            if ident in moves_by_id:
+                layer.set("transform", moves_by_id[ident])
+            ET.SubElement(layer, f"{namespace}title").text = label
+            ET.SubElement(layer, f"{namespace}image", {"x": str(left), "y": str(top), "width": str(asset.width),
+                                                      "height": str(asset.height), "href": data_uri(asset)})
+            overlay_report.append({"layer": ident, "label": label, "bbox": [left, top, asset.width, asset.height]})
+
+    append_slot(0)
+    for index, (ident, coverage, bounds) in enumerate(reversed(foreground), 1):
+        if bounds is None:
+            append_slot(index)
+            continue
         left, top, right, bottom = bounds
         box = np.s_[top:bottom, left:right]
-        cutout = pixels[box].copy()
+        cutout = corrected.get(ident, pixels)[box].copy()
         cutout[coverage[box] == 0] = 0
         layer = ET.SubElement(svg, f"{namespace}g", {"id": ident, "data-kind": "object",
                                                    "data-role": "title-foreground"})
         ET.SubElement(layer, f"{namespace}title").text = by_id[ident].get("label", ident)
         ET.SubElement(layer, f"{namespace}image", {"x": str(left), "y": str(top), "width": str(right - left),
                                                   "height": str(bottom - top), "href": data_uri(Image.fromarray(cutout))})
+        append_slot(index)
     output.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(svg).write(output, encoding="utf-8", xml_declaration=True)
-    front_ids = [ident for ident, _, _ in reversed(foreground)]
+    front_ids = [ident for ident, _, bounds in reversed(foreground) if bounds is not None]
     return {"svg": str(output), "mode": "title-only", "pixel_source_sha256": pixel_hash,
-            "render_order": ["background-title-cleaned", title["id"], *overlays, *front_ids],
+            "render_order": [node.get("id") for node in svg if node.get("id")],
             "title_overlays": overlay_report,
             "title_foreground": [{"layer": ident, **evidence[ident]} for ident in front_ids],
             "cleaned_title_pixels": int(np.count_nonzero(removal)),
             "cleaned_overlay_pixels": int(np.count_nonzero(overlay_removal)), "paper_texture_pixels": paper_pixels,
+            "photo_title_repair_pixels": photo_pixels,
             "protected_foreground_pixels": int(np.count_nonzero(protection)), "warnings": warnings}

@@ -39,3 +39,21 @@ class PaperRepairTests(unittest.TestCase):
         residual = restored[center, :3].astype(np.float32) - tone[center]
         self.assertLess(abs(float(residual.mean())), 1.0)
         self.assertGreater(float(residual.std()), 1.0)
+
+    def test_wide_repair_can_reuse_patches_beyond_the_local_grain_search(self):
+        import numpy as np
+
+        rng = np.random.default_rng(19)
+        noise = rng.integers(-6, 7, (320, 320, 1))
+        paper = (np.array([222, 221, 215]) + noise).astype(np.uint8)
+        pixels = np.dstack((paper, np.full((320, 320), 255, np.uint8)))
+        mask = np.zeros(paper.shape[:2], np.uint8)
+        mask[42:278, 42:278] = 255
+        pixels[mask > 0, :3] = [188, 23, 14]
+        filled = pixels.copy()
+        filled[mask > 0, :3] = [208, 159, 142]
+        self.assertEqual(restore_paper(pixels, filled, mask, mask, wide=True), int(np.count_nonzero(mask)))
+        center = filled[145:175, 145:175, :3].astype(np.float32)
+        self.assertLess(float(np.abs(center.mean(axis=(0, 1)) - [222, 221, 215]).max()), 2)
+        self.assertGreater(float(center.std(axis=(0, 1)).mean()), 1.0)
+        np.testing.assert_array_equal(filled[mask == 0], pixels[mask == 0])

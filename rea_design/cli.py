@@ -174,6 +174,9 @@ def main():
     p.add_argument("--title-only", action="store_true", help="Clean and replace the title while preserving the rest of the source")
     p.add_argument("--title-behind", action="append", default=[], metavar="LAYER_ID",
                    help="Explicit foreground object for --title-only; repeat for multiple layers")
+    p.add_argument("--title-line-over", nargs=2, action="append", default=[], metavar=("LINE", "LAYER_ID"),
+                   help="Paint a numbered title line over a foreground object in --title-only mode")
+    p.add_argument("--title-paper", action="store_true", help="Reconstruct paper grain beneath the old title ink")
     p.add_argument("--title-overlay", nargs=2, action="append", default=[], metavar=("TEXT_LAYER_ID", "LABEL"),
                    help="Lift ink from an OCR layer and paint it above the replacement title")
     p.add_argument("--title-font", metavar="FONT_FILE", help="Measure the title using a local TTF or OTF")
@@ -234,7 +237,8 @@ def main():
                                 repair_plate=args.repair_plate, repair_model=args.repair_model,
                                 generative_repairs=args.generative_repair, moves=args.move, title_lines=args.title_line,
                                 title_only=args.title_only, title_behind=args.title_behind,
-                                title_overlays=args.title_overlay)
+                                title_overlays=args.title_overlay, title_line_over=args.title_line_over,
+                                title_paper=args.title_paper)
         # JSON remains lossless even when Windows redirects stdout to a legacy code page.
         print(json.dumps(result, indent=2, ensure_ascii=True))
     except (OSError, ValueError, UnidentifiedImageError) as exc:

@@ -307,8 +307,11 @@ def svg_document(size, description):
     return namespace, svg
 
 
-def append_title_lines(group, namespace, item, title_font):
-    for index, line in enumerate(item["lines"], 1):
+def append_title_lines(group, namespace, item, title_font, indices=None):
+    if indices is None:
+        indices = range(1, len(item["lines"]) + 1)
+    for index in indices:
+        line = item["lines"][index - 1]
         attrs = title_attributes(line, item, title_font)
         attrs["id"] = f"{item['id']}-line-{index:03d}"
         ET.SubElement(group, f"{namespace}text", attrs).text = line["text"]
@@ -374,11 +377,11 @@ def object_overlap(coverage, occluders, seen_masks, box):
 
 def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None, title_font=None,
                repair_plate=None, repair_model=None, generative_repairs=(), moves=(), title_lines=None,
-               title_only=False, title_behind=(), title_overlays=()):
+               title_only=False, title_behind=(), title_overlays=(), title_line_over=(), title_paper=False):
     cv2, np = _deps()
     validate_repair_options(repair_plate, repair_model)
-    if (title_behind or title_overlays) and not title_only:
-        raise ValueError("--title-behind and --title-overlay require --title-only")
+    if (title_behind or title_overlays or title_line_over or title_paper) and not title_only:
+        raise ValueError("Title layering and paper options require --title-only")
     if title_only and (title_lines is None or any((clean_plate, background_plate, repair_plate,
                                                     repair_model, generative_repairs))):
         raise ValueError("--title-only requires --title-line and uses the source image without plates")
@@ -413,7 +416,8 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             line["text"] = text
         if title_only:
             return export_title_edit(image, pixel_hash, scene, scene_path, output, titles[0], title_font,
-                                     title_behind, title_overlays, moves_by_id)
+                                     title_behind, title_overlays, moves_by_id,
+                                     title_line_over=title_line_over, title_paper=title_paper)
     repair = None
     if repair_plate:
         protect_inputs((output,), repair_plate)
