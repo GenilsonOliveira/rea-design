@@ -4,11 +4,13 @@ import hashlib
 import io
 import json
 import math
+from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from PIL import Image, ImageFont
 from .cli import flatten, load, protect_inputs
+from .layering import propose_groups, suggest_overlap, suggested_paint_order
 from .vision import _deps
 
 
@@ -84,20 +86,25 @@ def read_mask(mask_bytes, size):
 
 
 def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, typography_json=None,
-               grounded_json=None, grabcut=(), manual=(), replacements=()):
+               grounded_json=None, grounded_source=None, grabcut=(), manual=(), replacements=()):
     _, np = _deps()
     image = flatten(load(source))
     w, h = image.size
     source_hash = sha(source)
+    if grounded_source and not grounded_json:
+        raise ValueError("--grounded-source requires --grounded")
+    if grounded_source and load(grounded_source).size != image.size:
+        raise ValueError("Grounded source must be aligned to the scene canvas")
+    grounded_source_hash = sha(grounded_source) if grounded_source else source_hash
     output = Path(output).resolve()
     scene_file = output / "scene.json"
     if not (semantic_json or ocr_json or geometry_json or typography_json or grounded_json or grabcut or manual):
         raise ValueError("Provide at least one scene input (--semantic, --ocr, --geometry, --typography, --grounded, --grabcut or --mask)")
     evidence_files = [path for path in (semantic_json, ocr_json, geometry_json, typography_json, grounded_json, *grabcut) if path is not None]
 
-    def read_evidence(path):
+    def read_evidence(path, expected_hash=source_hash):
         data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-        if (data.get("width"), data.get("height")) != (w, h) or data.get("source_sha256") != source_hash:
+        if (data.get("width"), data.get("height")) != (w, h) or data.get("source_sha256") != expected_hash:
             raise ValueError(f"Evidence does not match source size or hash: {path}; rerun the analysis command")
         return data
 
@@ -115,7 +122,7 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, t
             path = mask_from_evidence(semantic_json, item["mask"])
             candidates.append((item["id"], item["class"], path, "semantic mask"))
     if grounded_json:
-        for item in read_evidence(grounded_json)["items"]:
+        for item in read_evidence(grounded_json, grounded_source_hash)["items"]:
             path = mask_from_evidence(grounded_json, item["mask"])
             grounded_hashes[item["id"]] = item["mask_sha256"]
             candidates.append((item["id"], item["label"], path, "text-prompt mask"))
@@ -129,7 +136,8 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, t
     replacement_map = dict(replacements)
     if len(replacement_map) != len(replacements) or set(replacement_map).difference(item[0] for item in candidates):
         raise ValueError("Each --replace-mask must reference a unique existing object ID")
-    inputs = (source, *evidence_files, *(item[2] for item in candidates), *replacement_map.values())
+    inputs = (source, *([grounded_source] if grounded_source else []), *evidence_files,
+              *(item[2] for item in candidates), *replacement_map.values())
     protect_inputs((scene_file,), *inputs)
     ocr_items = read_evidence(ocr_json)["items"] if ocr_json else []
     output.mkdir(parents=True, exist_ok=True)
@@ -190,15 +198,18 @@ def make_scene(source, semantic_json, ocr_json, output, *, geometry_json=None, t
     if len({layer["id"] for layer in layers}) != len(layers):
         raise ValueError("Evidence contains duplicate layer IDs")
     overlaps = []
+    areas = [int(np.count_nonzero(mask)) for mask in masks]
     for i in range(len(layers)):
         for j in range(i+1, len(layers)):
             count = int(np.count_nonzero(masks[i] & masks[j]))
             if count:
-                overlaps.append({"layers": [layers[i]["id"], layers[j]["id"]], "intersection_pixels": count,
-                                 "ordering": "unknown", "evidence": "mask intersection; not proof of occlusion"})
+                overlaps.append(suggest_overlap(layers[i], layers[j], areas[i], areas[j], count))
+    propose_groups(layers)
     data = {"version": "0.2", "width": w, "height": h, "source_sha256": source_hash, "layers": layers,
-            "overlaps": overlaps, "render_order": [layer["id"] for layer in layers],
-            "note": "Proposed paint order: objects, graphics, then text. Review and edit render_order."}
+            "overlaps": overlaps, "render_order": suggested_paint_order(layers, overlaps),
+            "note": "Paint order is a proposal. Review containment and reorder layers if needed."}
+    if grounded_source_hash != source_hash:
+        data["grounded_source_sha256"] = grounded_source_hash
     scene_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return data
 
@@ -233,8 +244,21 @@ def inpaint_rgba(pixels, removal):
     return result
 
 
+def blend_overlap(pixels, donor, mask, radius):
+    cv2, np = _deps()
+    kernel_size = 2 * radius + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    expanded = cv2.dilate(mask, kernel)
+    softened = cv2.GaussianBlur(expanded, (kernel_size, kernel_size), max(1, radius / 3))
+    alpha = np.maximum(softened, mask).astype(np.float32)[:, :, None] / 255
+    # Keep the source alpha/outline of the receiving layer; only its colors are repaired.
+    result = pixels.copy()
+    result[:, :, :3] = np.rint(pixels[:, :, :3] * (1 - alpha) + donor[:, :, :3] * alpha).astype(np.uint8)
+    return result
+
+
 def title_attributes(line, block, font_file):
-    x, y, width, height = line["bbox"]
+    x, y, width, height = line.get("layout_bbox", line["bbox"])
     font_size = height * 1.37
     attrs = {"x": str(x), "y": str(y + height), "font-family": block.get("font_family", "sans-serif"),
              "font-weight": str(block.get("font_weight", 400)), "font-size": str(font_size),
@@ -259,7 +283,8 @@ def title_attributes(line, block, font_file):
     return attrs
 
 
-def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None, title_font=None):
+def export_svg(source, scene_path, output, *, clean_plate=None, background_plate=None, title_font=None,
+               repair_plate=None, moves=(), title_lines=None):
     cv2, np = _deps()
     scene_path = Path(scene_path).resolve()
     scene = json.loads(scene_path.read_text(encoding="utf-8-sig"))
@@ -276,6 +301,9 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
         image = load(clean_plate)
         if image.size != (w, h):
             raise ValueError(f"Clean plate must be aligned to the scene canvas ({w} × {h})")
+    pixel_hash = sha(clean_plate or source)
+    if scene.get("grounded_source_sha256", pixel_hash) != pixel_hash:
+        raise ValueError("Use the same aligned photo for --clean-plate that was used to make the text-prompt masks")
     if background_plate:
         protect_inputs((output,), background_plate)
         supplied_background = load(background_plate)
@@ -286,10 +314,37 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
     order = scene["render_order"]
     if len(by_id) != len(layers) or len(order) != len(layers) or set(order) != set(by_id):
         raise ValueError("render_order must contain each unique layer ID exactly once")
+    moves_by_id = {}
+    for ident, dx, dy in moves:
+        if ident not in by_id or ident in moves_by_id:
+            raise ValueError("Each --move must name a unique existing layer")
+        dx, dy = float(dx), float(dy)
+        if not all(math.isfinite(value) for value in (dx, dy)):
+            raise ValueError("Layer offsets must be finite numbers")
+        moves_by_id[ident] = f"translate({dx:g} {dy:g})"
+    if title_lines is not None:
+        titles = [item for item in layers if item["kind"] == "text-block"]
+        if len(titles) != 1 or len(title_lines) != len(titles[0]["lines"]):
+            raise ValueError("Repeat --title-line once per line of the single editable title")
+        for line, text in zip(titles[0]["lines"], title_lines, strict=True):
+            line["text"] = text
+    repair = None
+    if repair_plate:
+        protect_inputs((output,), repair_plate)
+        donor = load(repair_plate)
+        if donor.size != (w, h):
+            raise ValueError(f"Repair plate must be aligned to the scene canvas ({w} × {h})")
+        repair = np.asarray(donor)
+    occluders = {}
+    for overlap in scene.get("overlaps", []):
+        if overlap.get("ordering") in {"suggested", "confirmed"}:
+            occluders.setdefault(overlap["behind"], []).append(overlap["in_front"])
     pixels = np.asarray(image)
     display = flatten(image)
     warnings = []
     objects = {}
+    seen_masks = {}
+    repaired_overlaps = []
     removal = np.zeros((h, w), np.uint8)
     front_graphics = np.zeros_like(removal)
     for ident in reversed(order):
@@ -338,12 +393,26 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
             continue
         left, top, right, bottom = bounds
         box = np.s_[top:bottom, left:right]
+        hidden = np.zeros_like(coverage[box])
+        for front in occluders.get(ident, ()):
+            if front in seen_masks:
+                hidden |= seen_masks[front][box] & coverage[box]
+        seen_masks[ident] = coverage
         occluded = coverage[box] & front_graphics[box]
+        source_pixels = pixels[box]
+        if hidden.any():
+            if repair is not None:
+                radius = max(3, min(16, round(min(w, h) * .018)))
+                source_pixels = blend_overlap(source_pixels, repair[box], hidden, radius)
+                repaired_overlaps.append({"layer": ident, "pixels": int(np.count_nonzero(hidden))})
+            else:
+                occluded |= hidden
+                warnings.append(f"{ident}: filled hidden overlap approximately; use --repair-plate for an aligned donor")
         donors = (coverage[box] > 0) & (occluded == 0)
         if occluded.any() and donors.any():
-            cutout = inpaint_rgba(pixels[box], occluded | (255 - coverage[box]))
+            cutout = inpaint_rgba(source_pixels, occluded | (255 - coverage[box]))
         else:
-            cutout = pixels[box].copy()
+            cutout = source_pixels.copy()
             if occluded.any():
                 warnings.append(f"{ident}: insufficient object pixels to remove overlapping graphics")
         cutout[:, :, 3] = np.minimum(pixels[box][:, :, 3], mask[box])
@@ -362,9 +431,20 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
     ET.SubElement(svg, f"{{{ns}}}title").text = "Editable reconstruction proposal; verify layers and text"
     background_id = "background-supplied" if background_plate else "background-inpainted"
     ET.SubElement(svg, f"{{{ns}}}image", {"id": background_id, "width": str(w), "height": str(h), "href": data_uri(background)})
+    group_runs = Counter()
+    previous = None
     for ident in order:
         item = by_id[ident]
-        group = ET.SubElement(svg, f"{{{ns}}}g", {"id": ident, "data-kind": item["kind"]})
+        category = item.get("group")
+        if category and category != previous:
+            group_runs[category] += 1
+            suffix = "" if group_runs[category] == 1 else f"-{group_runs[category]}"
+            bundle = ET.SubElement(svg, f"{{{ns}}}g", {"id": f"group-{category}{suffix}", "data-role": category})
+        previous = category
+        parent = bundle if category else svg
+        group = ET.SubElement(parent, f"{{{ns}}}g", {"id": ident, "data-kind": item["kind"]})
+        if ident in moves_by_id:
+            group.set("transform", moves_by_id[ident])
         if "role" in item:
             group.set("data-role", item["role"])
         if item["kind"] == "object":
@@ -403,6 +483,7 @@ def export_svg(source, scene_path, output, *, clean_plate=None, background_plate
     output.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(svg).write(output, encoding="utf-8", xml_declaration=True)
     return {"svg": str(output), "layers": len(layers), "warnings": warnings,
-            "pixel_source_sha256": sha(clean_plate or source),
+            "pixel_source_sha256": pixel_hash, "repaired_overlaps": repaired_overlaps,
+            "repair_plate_sha256": sha(repair_plate) if repair_plate else None,
             "background_plate_sha256": sha(background_plate) if background_plate else None,
             "note": "Editable text and raster cutouts over a raster background; font, depth and hidden pixels are estimates."}
